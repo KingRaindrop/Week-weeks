@@ -53,15 +53,15 @@ android {
 
     signingConfigs {
         release {
-            def storeFilePath = signingValue("MEIN_STORE_FILE", "storeFile")
-            def storePassword = signingValue("MEIN_STORE_PASSWORD", "storePassword")
-            def keyAlias = signingValue("MEIN_KEY_ALIAS", "keyAlias")
-            def keyPassword = signingValue("MEIN_KEY_PASSWORD", "keyPassword")
-            if (storeFilePath && storePassword && keyAlias && keyPassword) {
-                storeFile rootProject.file(storeFilePath)
-                storePassword storePassword
-                keyAlias keyAlias
-                keyPassword keyPassword
+            def resolvedStoreFile = signingValue("MEIN_STORE_FILE", "storeFile")
+            def resolvedStorePassword = signingValue("MEIN_STORE_PASSWORD", "storePassword")
+            def resolvedKeyAlias = signingValue("MEIN_KEY_ALIAS", "keyAlias")
+            def resolvedKeyPassword = signingValue("MEIN_KEY_PASSWORD", "keyPassword")
+            if (resolvedStoreFile && resolvedStorePassword && resolvedKeyAlias && resolvedKeyPassword) {
+                storeFile rootProject.file(resolvedStoreFile)
+                storePassword resolvedStorePassword
+                keyAlias resolvedKeyAlias
+                keyPassword resolvedKeyPassword
             }
         }
     }

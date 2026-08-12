@@ -87,20 +87,24 @@
 
 ## 构建方式
 
-当前环境建议使用 D 盘 Android 数据目录：
+项目自带 Gradle Wrapper（Gradle 9.2.0），推荐直接用：
+
+```powershell
+.\gradlew.bat --no-daemon assembleDebug
+```
+
+首次运行时 wrapper 会按 `GRADLE_USER_HOME`（默认 `~/.gradle`）查找/下载 Gradle 发行版。当前机器建议使用 D 盘 Android 数据目录（可先设置环境变量，再运行 wrapper）：
 
 - SDK：`D:\Android\Sdk`
 - Gradle 缓存：`D:\Android\Gradle`
 - JDK：`D:\Android Studio\jbr`
-
-PowerShell 构建示例：
 
 ```powershell
 $env:JAVA_HOME="D:\Android Studio\jbr"
 $env:ANDROID_HOME="D:\Android\Sdk"
 $env:ANDROID_SDK_ROOT="D:\Android\Sdk"
 $env:GRADLE_USER_HOME="D:\Android\Gradle"
-& "$env:USERPROFILE\.gradle\wrapper\dists\gradle-9.2.0-bin\11i5gvueggl8a5cioxuftxrik\gradle-9.2.0\bin\gradle.bat" --no-daemon assembleDebug
+.\gradlew.bat --no-daemon assembleDebug
 ```
 
 生成的调试 APK 位于：
@@ -109,12 +113,11 @@ $env:GRADLE_USER_HOME="D:\Android\Gradle"
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-也可以在项目目录运行一键构建与 lint 脚本：
+也可以在项目目录运行一键构建与 lint 脚本（自动使用 wrapper）：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\build-verify.ps1
 ```
-
 
 ## 发布签名
 

@@ -44,3 +44,48 @@
 
 - 每个批次完成后提交一次 git，保持可回退粒度。
 - 后续批次顺序：构建可移植性 → 存储层去重 → 解析层拆分+测试 → lint 清理。
+
+---
+
+## 2026-08-12 · 批次 2（短期）：Gradle Wrapper 与构建可移植性
+
+**Git 提交**：`待提交`
+
+### 发现的问题
+
+1. **缺少 Gradle Wrapper**
+   仓库没有 `gradlew`/`gradlew.bat`/`gradle/wrapper/`，构建依赖 `tools/build-verify.ps1` 里写死的本机路径（含 `gradle-wrapper\dists\...\<hash>\...` 这种随版本变化的 hash 目录）。换机器或 Gradle 升级小版本都会直接失败。
+2. **缺少 `gradle.properties`**
+   没有 JVM 内存、并行、缓存等常规配置。
+3. **`app/build.gradle` 签名块变量遮蔽 DSL**
+   批次 1 引入的局部变量 `storeFile`/`keyAlias` 等与 Gradle DSL 方法同名，导致 `No signature of method: java.lang.String.call()` 构建失败。
+4. **离线环境无法生成 wrapper**
+   Gradle 9 的 `wrapper` 任务需联网校验发行版 URL（`services.gradle.org` 不可达），标准命令失败。
+
+### 解决的问题
+
+1. **手动离线生成 Gradle Wrapper（9.2.0）**
+   - 从本机已缓存的 Gradle 发行版中提取官方 `gradle-wrapper.jar`（`lib/plugins/gradle-wrapper-main-9.2.0.jar` 内嵌）。
+   - 手写标准 `gradlew.bat`（Windows）与 `gradlew`（POSIX）启动脚本。
+   - 编写 `gradle-wrapper.properties`，并设置 `validateDistributionUrl=false` 以适配离线环境。
+2. **修复签名变量遮蔽**
+   局部变量重命名为 `resolvedStoreFile` 等，避免与 DSL 冲突；`assembleDebug` 与 `assembleRelease` 均构建成功（release 走 `secrets/` 签名）。
+3. **新增 `gradle.properties`**
+   `-Xmx2048m -Dfile.encoding=UTF-8`、`parallel`、`caching`。
+4. **`tools/build-verify.ps1` 改用 wrapper**
+   不再硬编码 Gradle dist hash 路径；JDK/SDK/GRADLE_USER_HOME 支持环境变量覆盖，默认回退 D 盘。
+5. **README 构建章节重写**
+   改为以 wrapper 为主入口，保留 D 盘环境变量说明。
+6. **发行版缓存对齐**
+   将 `gradle-9.2.0-bin` 发行版复制到 `D:\Android\Gradle\wrapper\dists`，使 `GRADLE_USER_HOME=D:\Android\Gradle` 时 wrapper 离线可用。
+
+### 待解决的问题
+
+- `MainActivity`/`ReminderScheduler` 重复加密代码（批次 3）。
+- PDF 解析逻辑拆分与测试缺失（批次 4）。
+- Lint 8 个警告：5 处 `commit()`、3 个未使用资源（批次 5）。
+
+### 改进方向
+
+- 构建入口统一为 `.\gradlew.bat`；后续脚本与文档都以 wrapper 为准。
+- 可考虑后续开启 configuration cache（Gradle 已提示）。
