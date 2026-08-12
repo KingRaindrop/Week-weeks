@@ -1,0 +1,82 @@
+plugins {
+    id "com.android.application"
+}
+
+// Release signing credentials are resolved in this order:
+//   1. Environment variables (preferred for CI):
+//      MEIN_STORE_FILE, MEIN_STORE_PASSWORD, MEIN_KEY_ALIAS, MEIN_KEY_PASSWORD
+//   2. secrets/release-signing.properties in the project (git-ignored; see the .template)
+//   3. ~/.gradle/mein-stundenplan-signing.properties (user home, outside the repo)
+def signingProps = new Properties()
+[
+    rootProject.file("secrets/release-signing.properties"),
+    new File(System.getProperty("user.home"), ".gradle/mein-stundenplan-signing.properties")
+].each { File candidate ->
+    if (candidate.exists()) {
+        candidate.withInputStream { signingProps.load(it) }
+    }
+}
+
+def signingValue = { String envName, String propName ->
+    def envValue = System.getenv(envName)
+    if (envValue != null && !envValue.isEmpty()) {
+        return envValue
+    }
+    return signingProps.getProperty(propName)
+}
+
+android {
+    namespace "com.example.meinstundenplan"
+    compileSdk {
+        version = release(36) {
+            it.minorApiLevel = 1
+        }
+    }
+    buildToolsVersion "36.1.0"
+
+    defaultConfig {
+        applicationId "com.example.meinstundenplan"
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName "1.0"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            def storeFilePath = signingValue("MEIN_STORE_FILE", "storeFile")
+            def storePassword = signingValue("MEIN_STORE_PASSWORD", "storePassword")
+            def keyAlias = signingValue("MEIN_KEY_ALIAS", "keyAlias")
+            def keyPassword = signingValue("MEIN_KEY_PASSWORD", "keyPassword")
+            if (storeFilePath && storePassword && keyAlias && keyPassword) {
+                storeFile rootProject.file(storeFilePath)
+                storePassword storePassword
+                keyAlias keyAlias
+                keyPassword keyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            buildConfigField "boolean", "ENABLE_TEST_COURSE", "true"
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            debuggable false
+            buildConfigField "boolean", "ENABLE_TEST_COURSE", "false"
+            signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+}
