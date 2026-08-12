@@ -6,23 +6,14 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
-import android.security.keystore.KeyGenParameterSpec;
-import android.security.keystore.KeyProperties;
-import android.util.Base64;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.nio.charset.StandardCharsets;
-import java.security.KeyStore;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
 
 final class ReminderScheduler {
     static final String EXTRA_REQUEST_CODE = "reminder_request_code";
@@ -34,9 +25,7 @@ final class ReminderScheduler {
     private static final String LAST_SUBMISSION_OK_KEY = "class_reminder_last_submission_ok";
     private static final String LAST_SUBMISSION_AT_KEY = "class_reminder_last_submission_at";
     private static final String KEY_ALIAS = "mein_stundenplan_reminder_schedule_key";
-    private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
-    private static final String AES_GCM = "AES/GCM/NoPadding";
-    private static final int GCM_TAG_LENGTH_BITS = 128;
+    private static final SecureStorage STORAGE = new SecureStorage(KEY_ALIAS);
 
     private ReminderScheduler() {
     }
@@ -219,7 +208,7 @@ final class ReminderScheduler {
             JSONObject payload = new JSONObject();
             payload.put("generation", schedule.generation);
             payload.put("entries", array);
-            String encrypted = encrypt(payload.toString());
+            String encrypted = STORAGE.encrypt(payload.toString());
             return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                     .edit()
                     .putString(STORE_KEY, encrypted)
@@ -237,7 +226,7 @@ final class ReminderScheduler {
             return new ScheduleData(0L, entries);
         }
         try {
-            String decoded = decrypt(encrypted);
+            String decoded = STORAGE.decrypt(encrypted);
             long generation = 0L;
             JSONArray array;
             if (decoded.trim().startsWith("[")) {
@@ -263,46 +252,6 @@ final class ReminderScheduler {
         return new ScheduleData(Long.MIN_VALUE, entries);
     }
 
-    private static String encrypt(String plainText) throws Exception {
-        Cipher cipher = Cipher.getInstance(AES_GCM);
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey());
-        JSONObject envelope = new JSONObject();
-        envelope.put("iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP));
-        envelope.put("data", Base64.encodeToString(
-                cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8)),
-                Base64.NO_WRAP
-        ));
-        return envelope.toString();
-    }
-
-    private static String decrypt(String encrypted) throws Exception {
-        JSONObject envelope = new JSONObject(encrypted);
-        byte[] iv = Base64.decode(envelope.getString("iv"), Base64.NO_WRAP);
-        byte[] data = Base64.decode(envelope.getString("data"), Base64.NO_WRAP);
-        Cipher cipher = Cipher.getInstance(AES_GCM);
-        cipher.init(Cipher.DECRYPT_MODE, getOrCreateSecretKey(), new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv));
-        return new String(cipher.doFinal(data), StandardCharsets.UTF_8);
-    }
-
-    private static SecretKey getOrCreateSecretKey() throws Exception {
-        KeyStore keyStore = KeyStore.getInstance(ANDROID_KEYSTORE);
-        keyStore.load(null);
-        KeyStore.Entry existing = keyStore.getEntry(KEY_ALIAS, null);
-        if (existing instanceof KeyStore.SecretKeyEntry) {
-            return ((KeyStore.SecretKeyEntry) existing).getSecretKey();
-        }
-        KeyGenerator keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE);
-        KeyGenParameterSpec keySpec = new KeyGenParameterSpec.Builder(
-                KEY_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT
-        )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setRandomizedEncryptionRequired(true)
-                .build();
-        keyGenerator.init(keySpec);
-        return keyGenerator.generateKey();
-    }
 
     static final class Entry {
         final int requestCode;

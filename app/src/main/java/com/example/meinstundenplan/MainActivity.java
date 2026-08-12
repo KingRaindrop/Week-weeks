@@ -13,11 +13,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.security.keystore.KeyGenParameterSpec;
-import android.security.keystore.KeyProperties;
 import android.text.InputFilter;
 import android.text.TextUtils;
-import android.util.Base64;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -49,7 +46,6 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.security.KeyStore;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -65,10 +61,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.InflaterInputStream;
 
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
 
 public class MainActivity extends Activity {
     private static final String PREFS_NAME = "timetable";
@@ -82,10 +74,6 @@ public class MainActivity extends Activity {
     private static final String CALENDAR_WEEKS_KEY = "calendar_total_weeks";
     private static final String CALENDAR_NAME_KEY = "calendar_name";
     private static final String DEFAULT_CALENDAR_URL = "https://jwc.jyu.edu.cn/info/1102/4690.htm";
-    private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
-    private static final String KEY_ALIAS = "mein_stundenplan_courses_key";
-    private static final String AES_GCM = "AES/GCM/NoPadding";
-    private static final int GCM_TAG_LENGTH_BITS = 128;
     private static final int MAX_FIELD_LENGTH = 60;
     private static final int MAX_COURSES = 200;
     private static final int REQUEST_IMPORT_PDF = 40;
@@ -139,6 +127,7 @@ public class MainActivity extends Activity {
             Color.rgb(145, 91, 119),
             Color.rgb(118, 113, 79)
     };
+    private final SecureStorage secureStorage = new SecureStorage("mein_stundenplan_courses_key");
     private final List<Course> courses = new ArrayList<>();
     private final List<String> periodTimes = new ArrayList<>();
     private final Map<String, CountdownSnapshot> countdownSnapshots = new HashMap<>();
@@ -4454,7 +4443,7 @@ public class MainActivity extends Activity {
         boolean encryptedSource = encrypted != null;
         try {
             if (encryptedSource) {
-                raw = decrypt(encrypted);
+                raw = secureStorage.decrypt(encrypted);
             } else {
                 raw = prefs.getString(LEGACY_COURSES_KEY, "[]");
                 migrateLegacy = !raw.equals("[]");
@@ -4538,7 +4527,7 @@ public class MainActivity extends Activity {
             return;
         }
         try {
-            String encrypted = encrypt(array.toString());
+            String encrypted = secureStorage.encrypt(array.toString());
             boolean committed = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit()
                     .putString(COURSES_KEY, encrypted)
@@ -4554,46 +4543,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String encrypt(String plainText) throws Exception {
-        Cipher cipher = Cipher.getInstance(AES_GCM);
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey());
-        byte[] iv = cipher.getIV();
-        byte[] cipherText = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
-        JSONObject envelope = new JSONObject();
-        envelope.put("iv", Base64.encodeToString(iv, Base64.NO_WRAP));
-        envelope.put("data", Base64.encodeToString(cipherText, Base64.NO_WRAP));
-        return envelope.toString();
-    }
-
-    private String decrypt(String encrypted) throws Exception {
-        JSONObject envelope = new JSONObject(encrypted);
-        byte[] iv = Base64.decode(envelope.getString("iv"), Base64.NO_WRAP);
-        byte[] cipherText = Base64.decode(envelope.getString("data"), Base64.NO_WRAP);
-        Cipher cipher = Cipher.getInstance(AES_GCM);
-        cipher.init(Cipher.DECRYPT_MODE, getOrCreateSecretKey(), new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv));
-        return new String(cipher.doFinal(cipherText), StandardCharsets.UTF_8);
-    }
-
-    private SecretKey getOrCreateSecretKey() throws Exception {
-        KeyStore keyStore = KeyStore.getInstance(ANDROID_KEYSTORE);
-        keyStore.load(null);
-        KeyStore.Entry existing = keyStore.getEntry(KEY_ALIAS, null);
-        if (existing instanceof KeyStore.SecretKeyEntry) {
-            return ((KeyStore.SecretKeyEntry) existing).getSecretKey();
-        }
-
-        KeyGenerator keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE);
-        KeyGenParameterSpec keySpec = new KeyGenParameterSpec.Builder(
-                KEY_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT
-        )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setRandomizedEncryptionRequired(true)
-                .build();
-        keyGenerator.init(keySpec);
-        return keyGenerator.generateKey();
-    }
 
     private int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));

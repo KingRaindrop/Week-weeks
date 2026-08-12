@@ -89,3 +89,48 @@
 
 - 构建入口统一为 `.\gradlew.bat`；后续脚本与文档都以 wrapper 为准。
 - 可考虑后续开启 configuration cache（Gradle 已提示）。
+
+---
+
+## 2026-08-12 · 批次 3（短期）：抽取 SecureStorage 消除重复加密代码
+
+**Git 提交**：`待提交`
+
+### 发现的问题
+
+1. **两套几乎相同的 AES/GCM 实现**
+   `MainActivity`（课程数据，alias `mein_stundenplan_courses_key`）与 `ReminderScheduler`（提醒计划，alias `mein_stundenplan_reminder_schedule_key`）各自实现了 `encrypt`/`decrypt`/`getOrCreateSecretKey`，逻辑完全相同（JSON envelope：`{"iv","data"}` Base64、128-bit GCM tag、`setRandomizedEncryptionRequired(true)`），仅 alias 不同。重复约 80 行。
+2. **维护风险**
+   将来升级加密方案（如换算法、加版本号、密钥轮换）需要同时改两处，容易漏改导致数据不兼容。
+
+### 解决的问题
+
+1. **新增 `SecureStorage.java`**
+   - 包私有 final 类，构造时传入 key alias。
+   - `encrypt(String)`/`decrypt(String)` 实例方法，envelope 格式与原实现逐字节兼容（已有密文无需迁移）。
+   - `getOrCreateSecretKey()` 私有化。
+2. **`ReminderScheduler` 改造**
+   - 删除私有加密三方法与 4 个加密常量，新增 `private static final SecureStorage STORAGE = new SecureStorage(KEY_ALIAS)`。
+   - 调用点改为 `STORAGE.encrypt/STORAGE.decrypt`。
+   - 清理 9 个不再使用的 import。
+3. **`MainActivity` 改造**
+   - 删除私有加密三方法与 4 个加密常量，新增实例字段 `secureStorage`（alias `mein_stundenplan_courses_key`）。
+   - 调用点改为 `secureStorage.encrypt/decrypt`。
+   - 清理 8 个不再使用的 import。
+4. **编译验证通过**：`gradlew compileDebugJavaWithJavac` BUILD SUCCESSFUL。
+
+### 兼容性说明
+
+- 密文格式未变（相同 envelope、相同 GCM 参数），仅密钥管理代码搬家，用户已有数据不受影响。
+- 两个 alias 保持不变，Android Keystore 中已有密钥继续复用。
+
+### 待解决的问题
+
+- PDF 解析逻辑仍在 `MainActivity`，无测试（批次 4）。
+- Lint 8 个警告（批次 5）。
+- `MainActivity` 其余职责（UI、校历、倒计时）尚未拆分——本批次只处理了加密重复这一最安全的切入点。
+
+### 改进方向
+
+- 后续若加密方案升级（例如增加 envelope 版本字段），只需改 `SecureStorage` 一处。
+- `TimetableRulesTest` 的测试基建可复用同样的"纯 Java + android.jar 编译检查"模式扩展到 `SecureStorage` 的 envelope 格式测试（需设备/模拟器跑 Keystore，单测只能覆盖 JSON envelope 结构）。
