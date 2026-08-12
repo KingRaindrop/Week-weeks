@@ -49,7 +49,7 @@
 
 ## 2026-08-12 · 批次 2（短期）：Gradle Wrapper 与构建可移植性
 
-**Git 提交**：`待提交`
+**Git 提交**：`d9bd828 build: add offline Gradle wrapper 9.2.0 and portable build config`
 
 ### 发现的问题
 
@@ -94,7 +94,7 @@
 
 ## 2026-08-12 · 批次 3（短期）：抽取 SecureStorage 消除重复加密代码
 
-**Git 提交**：`待提交`
+**Git 提交**：`a4e1c3a refactor: extract SecureStorage for shared Keystore AES/GCM encryption`
 
 ### 发现的问题
 
@@ -134,3 +134,48 @@
 
 - 后续若加密方案升级（例如增加 envelope 版本字段），只需改 `SecureStorage` 一处。
 - `TimetableRulesTest` 的测试基建可复用同样的"纯 Java + android.jar 编译检查"模式扩展到 `SecureStorage` 的 envelope 格式测试（需设备/模拟器跑 Keystore，单测只能覆盖 JSON envelope 结构）。
+
+---
+
+## 2026-08-12 · 批次 4（短期）：拆分 PDF 解析为纯 Java 并补充测试
+
+**Git 提交**：`3e0bbc4 refactor: extract PDF course parsing into pure-Java PdfCourseParser`
+
+### 发现的问题
+
+1. **PDF 解析逻辑全部堆在 `MainActivity`**
+   PDF 头部校验、stream 解压、文本项提取、课程识别等约 500 行代码都以实例方法放在 `MainActivity` 内，与 UI、校历、倒计时职责混在一起，难以单独验证。
+2. **无测试**
+   解析逻辑只能靠手工导入 PDF 验证；`TimetableRulesTest` 建立起的"纯 Java + 命令行断言"测试基建没有扩展到 PDF 解析。
+
+### 解决的问题
+
+1. **新增纯 Java 的 `PdfCourseParser.java`（无 Android 依赖）**
+   - 公开入口 `parseCourses(byte[] pdfBytes, int maxPeriods, int maxStreamBytes, int maxCourses)`，返回 `ParseResult(courses, debugLog)`。
+   - 内聚 `PdfTextItem` / `PdfLiteral` / `ParsedCourse` 数据类与全部解析辅助方法；`MainActivity` 不再持有任何 PDF 解析代码。
+   - 调试日志改为写入 `debugLog` 由调用方输出，不再在解析器中直接调用 `android.util.Log`。
+2. **`ImportException` 提升为顶层共享异常**
+   原 `MainActivity` 内部类移至 `ImportException.java`，`MainActivity` 与 `PdfCourseParser` 共用同一个异常类型，`importPdf` 的 catch 行为不变。
+3. **`MainActivity` 瘦身**
+   - `importPdf` 改为调用 `PdfCourseParser.parseCourses(...)` 并把 `debugLog` 交给 `android.util.Log` 输出。
+   - `parsedAndShowCourses` 负责把 `ParsedCourse` 映射回 `Course`，配色沿用原有 `previewCourseColorForDay` 累积逻辑，导入行为不变。
+   - 删除未被调用的 `parsePdfCourses` 死代码路径。
+   - 删除 2 个不再使用的 import（`ByteArrayInputStream`、`InflaterInputStream`）。
+4. **新增 `tools/PdfCourseParserTest.java` 并接入 `tools/verify-logic.ps1`**
+   - 覆盖：非法文件头、空 PDF、单课程（列轴/行轴）、周次时间后缀清理、非法周次跳过、超范围节次跳过、多 stream、stream 大小上限、课程数上限、字面量转义、十六进制字符串、越界坐标拒绝、debugLog 非空。
+   - `verify-logic.ps1` 现在依次编译并运行 `TimetableRulesTest` + `PdfCourseParserTest`，再做全量 Android java 编译检查。
+
+### 兼容性说明
+
+- 解析字段与原先逐项对应（day/period/endPeriod/name/weeks/room/teacher），配色仍在 `MainActivity` 内按原顺序分配，用户导入结果不变。
+- 删除的 `parsePdfCourses` 是未被调用的死代码，无行为影响。
+
+### 待解决的问题
+
+- Lint 8 个警告（5 处 `commit()`、3 个未使用资源）（批次 5）。
+- `MainActivity` 其余职责（UI、校历、倒计时）尚未拆分。
+
+### 改进方向
+
+- 可复用同一纯 Java 测试基建为 `SecureStorage` 的 envelope 格式补充测试（单测仅覆盖 JSON envelope 结构）。
+- 后续批次按计划处理 Lint 清理。
