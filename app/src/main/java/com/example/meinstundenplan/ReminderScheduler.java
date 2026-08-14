@@ -1,5 +1,6 @@
 package com.example.meinstundenplan;
 
+import android.annotation.SuppressLint;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.Context;
@@ -80,6 +81,7 @@ final class ReminderScheduler {
         recordSubmissionResult(context, submitted);
     }
 
+    @SuppressLint("ApplySharedPref") // 保存 tombstone 失败时兜底清空，必须同步落盘，避免下次启动恢复旧提醒
     static void clear(Context context) {
         ScheduleData previous = loadSchedule(context);
         ScheduleData tombstone = new ScheduleData(
@@ -191,6 +193,7 @@ final class ReminderScheduler {
         return alarmManager != null && alarmManager.canScheduleExactAlarms();
     }
 
+    @SuppressLint("ApplySharedPref") // BroadcastReceiver 路径下进程可能被回收，必须同步落盘
     private static void recordSubmissionResult(Context context, boolean success) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()

@@ -1,7 +1,11 @@
 package com.example.meinstundenplan;
 
-import android.app.Activity;
-import android.app.AlertDialog;
+import android.annotation.SuppressLint;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.widget.SwitchCompat;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -60,18 +64,41 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
     private static final String PREFS_NAME = "timetable";
     private static final String LEGACY_COURSES_KEY = "courses";
     private static final String COURSES_KEY = "courses_encrypted_v2";
     private static final String THEME_KEY = "theme_mode";
+    private static final String ACCENT_KEY = "accent_preset";
+    private static final int DEFAULT_ACCENT_PRESET = 0;
+    private static final int[][] ACCENT_PRESETS = {
+            {0xFF1E68D2, 0xFF69B2FF}, // blue (default)
+            {0xFF0E9F8A, 0xFF4FD1BC}, // teal
+            {0xFF2E9E44, 0xFF6FD08A}, // green
+            {0xFF7A4FE0, 0xFFB59AFF}, // purple
+            {0xFFE8722E, 0xFFFFA35C}, // orange
+            {0xFFD64550, 0xFFFF8A94}, // red
+            {0xFF4050D8, 0xFF8A97FF}  // indigo
+    };
+    private static final String[] ACCENT_PRESET_NAMES = {
+            "\u84dd\u8272", "\u9752\u7eff", "\u7eff\u8272", "\u7d2b\u8272", "\u6a59\u8272", "\u7ea2\u8272", "\u975b\u9752"
+    };
     private static final String REMINDER_CODES_KEY = "class_reminder_codes";
+    private static final String NOTIFICATIONS_ENABLED_KEY = "notifications_enabled";
     private static final String PERIOD_TIMES_KEY = "period_times_v1";
     private static final String CALENDAR_START_KEY = "calendar_start_millis";
     private static final String CALENDAR_END_KEY = "calendar_end_millis";
     private static final String CALENDAR_WEEKS_KEY = "calendar_total_weeks";
     private static final String CALENDAR_NAME_KEY = "calendar_name";
     private static final String DEFAULT_CALENDAR_URL = "https://jwc.jyu.edu.cn/info/1102/4690.htm";
+    private static final Pattern CALENDAR_DATE_PATTERN = Pattern.compile(
+            "(20\\d{2})\\s*[年./\\-]\\s*(\\d{1,2})\\s*[月./\\-]\\s*(\\d{1,2})\\s*日?"
+    );
+    private static final Pattern CALENDAR_YEAR_PATTERN = Pattern.compile(
+            "(20\\d{2})\\s*[-—–至~～]\\s*(20\\d{2})"
+    );
+    private static final String[] CALENDAR_START_KEYWORDS = {"报到", "开学", "第一周", "开始上课", "注册"};
+    private static final String[] CALENDAR_END_KEYWORDS = {"散学", "放假", "暑假", "学期结束", "学期末"};
     private static final int MAX_FIELD_LENGTH = 60;
     private static final int MAX_COURSES = 200;
     private static final int REQUEST_IMPORT_PDF = 40;
@@ -383,7 +410,7 @@ public class MainActivity extends Activity {
             themeMode = savedMode;
         } else {
             themeMode = isSystemDarkMode() ? 2 : 1;
-            prefs.edit().putInt(THEME_KEY, themeMode).commit();
+            prefs.edit().putInt(THEME_KEY, themeMode).apply();
         }
         applyThemeMode();
     }
@@ -409,7 +436,7 @@ public class MainActivity extends Activity {
 
     private void toggleTheme() {
         themeMode = isDarkMode ? 1 : 2;
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(THEME_KEY, themeMode).commit();
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(THEME_KEY, themeMode).apply();
         recreate();
     }
 
@@ -482,7 +509,7 @@ public class MainActivity extends Activity {
             ));
         }
         ReminderScheduler.replaceSchedule(this, entries);
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().remove(REMINDER_CODES_KEY).commit();
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().remove(REMINDER_CODES_KEY).apply();
     }
 
     private void cancelScheduledClassReminders(android.app.AlarmManager alarmManager) {
@@ -503,6 +530,28 @@ public class MainActivity extends Activity {
             }
         } catch (Exception ignored) {
             // Ignore corrupted reminder metadata; the next save will replace it.
+        }
+    }
+
+    private boolean notificationsEnabled() {
+        return getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getBoolean(NOTIFICATIONS_ENABLED_KEY, true);
+    }
+
+    private void applyNotificationToggle(boolean enabled) {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                .putBoolean(NOTIFICATIONS_ENABLED_KEY, enabled)
+                .apply();
+        if (enabled) {
+            ensureNotificationPermission();
+            scheduleClassReminderNotifications();
+        } else {
+            android.app.AlarmManager alarmManager = (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
+            if (alarmManager != null) {
+                cancelScheduledClassReminders(alarmManager);
+            }
+            ReminderScheduler.clear(this);
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().remove(REMINDER_CODES_KEY).apply();
         }
     }
 
@@ -536,8 +585,23 @@ public class MainActivity extends Activity {
     }
 
     private int reminderRequestCode(Course course) {
-        long id = course.id == 0L ? course.name.hashCode() : course.id;
-        return (int) (id ^ (id >>> 32)) & 0x7fffffff;
+        if (course == null) {
+            return 1;
+        }
+        long id = course.id;
+        if (id != 0L) {
+            return (int) (id ^ (id >>> 32)) & 0x7fffffff;
+        }
+        // id 为 0（临时/测试课程等未分配 id 的课程）：组合「日 + 节次 + 跨节数 + 周次 + 名称」，
+        // 避免同名课程（不同天/不同节次）碰撞出相同 requestCode 而互相覆盖。
+        int hash = 17;
+        hash = 31 * hash + course.day;
+        hash = 31 * hash + course.period;
+        hash = 31 * hash + Math.max(0, course.endPeriod - course.period);
+        hash = 31 * hash + (course.weeks == null ? 0 : course.weeks.hashCode());
+        hash = 31 * hash + (course.name == null ? 0 : course.name.hashCode());
+        int result = hash & 0x7fffffff;
+        return result == 0 ? 1 : result;
     }
 
     private void configureWindow() {
@@ -1017,46 +1081,99 @@ public class MainActivity extends Activity {
         });
 
         if (dayCourses.isEmpty()) {
-            LinearLayout emptyState = new LinearLayout(this);
-            emptyState.setOrientation(LinearLayout.VERTICAL);
-            emptyState.setGravity(Gravity.CENTER);
-            emptyState.setBackground(elevatedCardBackground(cardColor(), dp(16)));
-            emptyState.setPadding(dp(24), dp(48), dp(24), dp(48));
+            MaterialCardView emptyState = new MaterialCardView(this);
+            emptyState.setCardBackgroundColor(cardColor());
+            emptyState.setCardElevation(dp(1));
+            emptyState.setRadius(dp(16));
+            emptyState.setStrokeColor(borderColor());
+            emptyState.setStrokeWidth(dp(1));
+            emptyState.setContentPadding(dp(24), dp(48), dp(24), dp(48));
 
-            TextView emptyIcon = new TextView(this);
-            emptyIcon.setText(selectedDayDateLabel());
-            emptyIcon.setTextSize(30);
-            emptyIcon.setTypeface(dengXian(Typeface.BOLD));
-            emptyIcon.setTextColor(accentColor());
-            emptyIcon.setGravity(Gravity.CENTER);
-            emptyIcon.setIncludeFontPadding(false);
-            emptyState.addView(emptyIcon);
+            LinearLayout content = new LinearLayout(this);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setGravity(Gravity.CENTER);
+            emptyState.addView(content, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            ));
+
+            FrameLayout emptyIconSurface = new FrameLayout(this);
+            emptyIconSurface.setBackground(buttonBackground(accentContainerColor(), dp(20)));
+            content.addView(emptyIconSurface, new LinearLayout.LayoutParams(dp(72), dp(72)));
+
+            ImageView emptyIcon = new ImageView(this);
+            emptyIcon.setImageResource(R.drawable.ic_calendar_outline);
+            emptyIcon.setImageTintList(ColorStateList.valueOf(accentColor()));
+            emptyIcon.setScaleType(ImageView.ScaleType.CENTER);
+            emptyIcon.setContentDescription("\u6682\u65e0\u8bfe\u7a0b");
+            emptyIconSurface.addView(emptyIcon, new FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER));
 
             TextView emptyTitle = new TextView(this);
             emptyTitle.setText("暂无课程");
             emptyTitle.setTextSize(18);
-            emptyTitle.setTypeface(dengXian(Typeface.BOLD));
+            emptyTitle.setTypeface(appTypeface(Typeface.BOLD));
             emptyTitle.setTextColor(primaryTextColor());
             emptyTitle.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
             );
-            titleParams.setMargins(0, dp(16), 0, 0);
-            emptyState.addView(emptyTitle, titleParams);
+            titleParams.setMargins(0, dp(20), 0, 0);
+            content.addView(emptyTitle, titleParams);
 
-            TextView emptyHint = new TextView(this);
-            emptyHint.setText("点击右上角 ＋ 添加课程\n或导入学校 PDF 课表");
-            emptyHint.setTextSize(14);
-            emptyHint.setTextColor(secondaryTextColor());
-            emptyHint.setGravity(Gravity.CENTER);
-            emptyHint.setLineSpacing(dp(4), 1.0f);
-            LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(
+            TextView emptyDate = new TextView(this);
+            emptyDate.setText(selectedDayDateLabel());
+            emptyDate.setTextSize(14);
+            emptyDate.setTypeface(appTypeface(Typeface.NORMAL));
+            emptyDate.setTextColor(secondaryTextColor());
+            emptyDate.setGravity(Gravity.CENTER);
+            emptyDate.setSingleLine(true);
+            LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
             );
-            hintParams.setMargins(0, dp(8), 0, 0);
-            emptyState.addView(emptyHint, hintParams);
+            dateParams.setMargins(0, dp(6), 0, dp(24));
+            content.addView(emptyDate, dateParams);
+
+            LinearLayout buttonRow = new LinearLayout(this);
+            buttonRow.setOrientation(LinearLayout.HORIZONTAL);
+            buttonRow.setGravity(Gravity.CENTER);
+
+            TextView addCta = new TextView(this);
+            addCta.setText("\uff0b \u6dfb\u52a0\u8bfe\u7a0b");
+            addCta.setTextSize(15);
+            addCta.setTypeface(appTypeface(Typeface.BOLD));
+            addCta.setTextColor(Color.WHITE);
+            addCta.setGravity(Gravity.CENTER);
+            addCta.setBackground(interactiveButtonBackground(accentColor(), dp(14)));
+            addCta.setPadding(dp(22), dp(12), dp(22), dp(12));
+            addCta.setOnClickListener(v -> showCourseDialog(null));
+
+            TextView importCta = new TextView(this);
+            importCta.setText(getString(R.string.import_pdf_cta));
+            importCta.setTextSize(15);
+            importCta.setTypeface(appTypeface(Typeface.BOLD));
+            importCta.setTextColor(accentColor());
+            importCta.setGravity(Gravity.CENTER);
+            importCta.setBackground(interactiveTranslucentBackground(
+                    accentContainerColor(), dp(14)));
+            importCta.setPadding(dp(22), dp(12), dp(22), dp(12));
+            importCta.setOnClickListener(v -> openPdfPicker());
+
+            LinearLayout.LayoutParams addCtaParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            addCtaParams.setMargins(0, 0, dp(10), 0);
+            buttonRow.addView(addCta, addCtaParams);
+            buttonRow.addView(importCta);
+
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            rowParams.setMargins(0, dp(20), 0, 0);
+            content.addView(buttonRow, rowParams);
 
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2084,11 +2201,68 @@ public class MainActivity extends Activity {
         overlay.requestFocus();
     }
 
+    private void showAccentColorDialog() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(dp(8), dp(12), dp(8), dp(12));
+        int[] selected = new int[]{accentPresetIndex()};
+
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle("\u754c\u9762\u8272\u8c03")
+                .setView(row)
+                .setNegativeButton("\u53d6\u6d88", null)
+                .setPositiveButton("\u786e\u5b9a", null)
+                .create();
+        renderAccentChoices(row, selected, dialog);
+        dialog.setOnShowListener(d -> {
+            Button confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            if (confirm != null) {
+                confirm.setOnClickListener(view -> {
+                    int index = selected[0];
+                    if (index != accentPresetIndex()) {
+                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(ACCENT_KEY, index).apply();
+                        dialog.dismiss();
+                        recreate();
+                    } else {
+                        dialog.dismiss();
+                    }
+                });
+            }
+        });
+        dialog.show();
+        styleDialogWindow(dialog);
+    }
+
+    private void renderAccentChoices(LinearLayout row, int[] selected, AlertDialog dialog) {
+        row.removeAllViews();
+        for (int i = 0; i < ACCENT_PRESETS.length; i++) {
+            final int index = i;
+            int color = ACCENT_PRESETS[i][0];
+            boolean isSelected = index == selected[0];
+            TextView swatch = new TextView(this);
+            swatch.setText(isSelected ? "\u2713" : "");
+            swatch.setTextColor(Color.WHITE);
+            swatch.setTextSize(18);
+            swatch.setTypeface(appTypeface(Typeface.BOLD));
+            swatch.setGravity(Gravity.CENTER);
+            swatch.setBackground(swatchStateListBackground(color, isSelected));
+            swatch.setContentDescription(ACCENT_PRESET_NAMES[index] + (isSelected ? "\uff0c\u5df2\u9009" : ""));
+            swatch.setOnClickListener(view -> {
+                selected[0] = index;
+                renderAccentChoices(row, selected, dialog);
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(44), dp(44));
+            params.setMargins(0, 0, dp(8), 0);
+            row.addView(swatch, params);
+        }
+    }
+
     private TextView settingsSectionLabel(String text) {
         TextView label = new TextView(this);
         label.setText(text);
         label.setTextSize(12);
-        label.setTypeface(dengXian(Typeface.BOLD));
+        label.setTypeface(appTypeface(Typeface.BOLD));
         label.setTextColor(secondaryTextColor());
         label.setGravity(Gravity.CENTER_VERTICAL);
         label.setPadding(dp(4), dp(7), dp(4), dp(4));
@@ -2593,6 +2767,7 @@ public class MainActivity extends Activity {
         }
     }
 
+    @SuppressLint("ApplySharedPref") // 依赖 commit 返回值判断写入成败，不能改 apply
     private boolean savePeriodTimes(List<String> rules) {
         JSONArray array = new JSONArray();
         for (String rule : rules) {
@@ -2762,6 +2937,7 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    @SuppressLint("ApplySharedPref") // 依赖 commit 返回值判断删除是否完全写入，不能改 apply
     private void deleteCurrentConfiguration() {
         android.app.AlarmManager alarmManager = (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
         if (alarmManager != null) {
@@ -2807,12 +2983,15 @@ public class MainActivity extends Activity {
 
         EditText startInput = input("YYYY-MM-DD", formatDate(calendarStartMillis()));
         EditText endInput = input("YYYY-MM-DD", formatDate(calendarEndMillis()));
+        EditText urlInput = input("https://jwc.jyu.edu.cn/...", DEFAULT_CALENDAR_URL);
         form.addView(label("开学日（第1周起点）"));
         form.addView(startInput, fieldParams());
         form.addView(label("散学日"));
         form.addView(endInput, fieldParams());
+        form.addView(label("校历网页链接（仅限 jwc.jyu.edu.cn 的 https 链接）"));
+        form.addView(urlInput, fieldParams());
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("校历设置")
                 .setMessage("总周数会按开学日和散学日自动计算。")
                 .setView(form)
@@ -2838,8 +3017,13 @@ public class MainActivity extends Activity {
             });
             Button online = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
             online.setOnClickListener(view -> {
+                String url = urlInput.getText().toString().trim();
+                if (url.isEmpty()) {
+                    Toast.makeText(this, "请先填写校历网页链接", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 dialog.dismiss();
-                importAcademicCalendarOnline(DEFAULT_CALENDAR_URL);
+                importAcademicCalendarOnline(url);
             });
         });
         dialog.show();
@@ -2908,25 +3092,73 @@ public class MainActivity extends Activity {
 
     private AcademicCalendar parseAcademicCalendar(String html, String sourceUrl) throws ImportException {
         String normalized = html == null ? "" : html.replaceAll("\\s+", "");
-        boolean knownCalendar = sourceUrl.equals(DEFAULT_CALENDAR_URL)
-                || normalized.contains("嘉应学院2025-2026学年校历")
-                || normalized.contains("2025-2026学年校历")
-                || normalized.contains("2025—2026学年校历");
-        if (!knownCalendar) {
-            throw new ImportException("未识别到支持的校历内容");
+        if (!normalized.contains("校历")) {
+            throw new ImportException("未识别到校历页面内容");
+        }
+        Calendar start = extractCalendarDateNear(normalized, CALENDAR_START_KEYWORDS);
+        Calendar end = extractCalendarDateNear(normalized, CALENDAR_END_KEYWORDS);
+        if (start == null || end == null || end.getTimeInMillis() < start.getTimeInMillis()) {
+            throw new ImportException("未能从校历页面解析出开学/散学日期，请打开「校历设置」手动填写");
+        }
+        long startMillis = start.getTimeInMillis();
+        long endMillis = end.getTimeInMillis();
+        long weekSpan = (endMillis - startMillis) / MILLIS_PER_WEEK;
+        if (weekSpan < 8 || weekSpan > 40) {
+            throw new ImportException("解析出的校历跨度异常，请打开「校历设置」手动填写");
         }
         AcademicCalendar calendar = new AcademicCalendar();
-        calendar.name = "嘉应学院 2025-2026 第二学期";
-        calendar.startMillis = dateMillis(2026, Calendar.MARCH, 2);
-        calendar.endMillis = dateMillis(2026, Calendar.JULY, 19);
-        calendar.totalWeeks = 20;
+        calendar.name = inferCalendarName(normalized, sourceUrl);
+        calendar.startMillis = startMillis;
+        calendar.endMillis = endMillis;
+        calendar.totalWeeks = (int) weekSpan + 1;
         return calendar;
+    }
+
+    /**
+     * 在校历 HTML 中查找关键词附近的「YYYY年M月D日 / YYYY-MM-DD」日期。
+     * 找不到任何关键词或关键词附近没有合法日期时返回 null。
+     */
+    private Calendar extractCalendarDateNear(String text, String[] keywords) {
+        for (String keyword : keywords) {
+            int index = text.indexOf(keyword);
+            if (index < 0) {
+                continue;
+            }
+            int from = Math.max(0, index - 40);
+            int to = Math.min(text.length(), index + 40);
+            Matcher matcher = CALENDAR_DATE_PATTERN.matcher(text.substring(from, to));
+            if (matcher.find()) {
+                try {
+                    int year = Integer.parseInt(matcher.group(1));
+                    int month = Integer.parseInt(matcher.group(2));
+                    int day = Integer.parseInt(matcher.group(3));
+                    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+                        Calendar calendar = Calendar.getInstance();
+                        calendar.clear();
+                        calendar.set(year, month - 1, day);
+                        return calendar;
+                    }
+                } catch (NumberFormatException ignored) {
+                    // 继续尝试下一个关键词
+                }
+            }
+        }
+        return null;
+    }
+
+    private String inferCalendarName(String normalized, String sourceUrl) {
+        Matcher yearMatcher = CALENDAR_YEAR_PATTERN.matcher(normalized);
+        if (yearMatcher.find()) {
+            return "嘉应学院 " + yearMatcher.group(1) + "-" + yearMatcher.group(2) + " 学年校历";
+        }
+        return "嘉应学院校历（在线导入）";
     }
 
     private void applyAcademicCalendar(AcademicCalendar calendar) {
         saveAcademicCalendar(calendar.name, calendar.startMillis, calendar.endMillis);
     }
 
+    @SuppressLint("ApplySharedPref") // 依赖 commit 返回值判断校历保存成败，不能改 apply
     private void saveAcademicCalendar(String name, long startMillis, long endMillis) {
         int totalWeeks = Math.max(1, (int) ((endMillis - startMillis) / MILLIS_PER_WEEK) + 1);
         boolean committed = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -2953,19 +3185,22 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "加密数据未解锁，暂时不能导入", Toast.LENGTH_LONG).show();
             return;
         }
-        try {
-            byte[] pdfBytes = readUriBytes(uri, MAX_PDF_BYTES);
+        Toast.makeText(this, "正在解析 PDF 课表...", Toast.LENGTH_SHORT).show();
+        final int maxPeriods = periodCount();
+        new Thread(() -> {
+            try {
+                byte[] pdfBytes = readUriBytes(uri, MAX_PDF_BYTES);
 
-            PdfCourseParser.ParseResult result = PdfCourseParser.parseCourses(
-                    pdfBytes, periodCount(), MAX_STREAM_BYTES, MAX_COURSES);
-            android.util.Log.d("PDFImport", result.debugLog);
-            parsedAndShowCourses(result.courses);
-
-        } catch (ImportException error) {
-            Toast.makeText(this, "导入错误: " + error.getMessage(), Toast.LENGTH_LONG).show();
-        } catch (Exception error) {
-            Toast.makeText(this, "PDF 导入失败: " + error.getClass().getSimpleName() + " - " + error.getMessage(), Toast.LENGTH_LONG).show();
-        }
+                PdfCourseParser.ParseResult result = PdfCourseParser.parseCourses(
+                        pdfBytes, maxPeriods, MAX_STREAM_BYTES, MAX_COURSES);
+                android.util.Log.d("PDFImport", result.debugLog);
+                runOnUiThread(() -> parsedAndShowCourses(result.courses));
+            } catch (ImportException error) {
+                runOnUiThread(() -> Toast.makeText(this, "导入错误: " + error.getMessage(), Toast.LENGTH_LONG).show());
+            } catch (Exception error) {
+                runOnUiThread(() -> Toast.makeText(this, "PDF 导入失败: " + error.getClass().getSimpleName() + " - " + error.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }).start();
     }
 
 
@@ -3898,6 +4133,7 @@ public class MainActivity extends Activity {
         }
     }
 
+    @SuppressLint("ApplySharedPref") // 依赖 commit 返回值判断课程数据写入成败，不能改 apply
     private void saveCourses() {
         if (storageLocked) {
             Toast.makeText(this, "加密数据未解锁，已拒绝覆盖保存", Toast.LENGTH_LONG).show();
