@@ -179,3 +179,287 @@
 
 - 可复用同一纯 Java 测试基建为 `SecureStorage` 的 envelope 格式补充测试（单测仅覆盖 JSON envelope 结构）。
 - 后续批次按计划处理 Lint 清理。
+
+---
+
+## 2026-08-12 · 批次 5（进行中 · 未提交）：UI 优化 preview + 自定义色调
+
+**Git 提交**：`未提交`（工作区改动，待确认后提交）
+
+### 背景
+
+用户打开 MUMU 模拟器体验应用后，提出两个方向：① UI 朝 Play 商店 / Material 3 风格改进；② 允许用户自行选择界面色调。本批次为 preview 迭代，改动集中在 `MainActivity.java`（全部程序化 UI）。
+
+### 已完成的改动（工作区，未提交）
+
+1. **P0 三项基础优化**
+   - 课程卡片阴影由 `elevation 4/11dp` 降为 `1/5dp`，更接近"细边框 + 浅影"的现代卡片。
+   - 摘要行拆分为"主行（第X周 · 周X · N门课）" + "状态 chip（正在上/下一节）"，新增 `statusChip` 与 `updateStatusChip()`。
+   - 空状态增加「＋ 添加课程」「导入 PDF 课表」两个 CTA 按钮（替代纯文字提示）。
+2. **Play 商店风格化**
+   - 课程卡片节次徽章改为 56/64dp 圆角方块（应用图标感），圆角 16/20dp。
+   - 时间从 accent 大字改为 tonal chip（容器色小胶囊）。
+   - 普通卡片圆角 18 → 24dp；日期 tab 选中从"实心紫药丸"改为 tonal 容器色 + accent 文字。
+   - 新增 `tonalContainerColor()`（主色 10% 混入卡片色）。
+3. **自定义界面色调（用户可选）**
+   - 新增 `ACCENT_KEY`（SharedPreferences 持久化）与 7 组 `ACCENT_PRESETS`：蓝/青绿/绿/紫/橙/红/靛，各含浅色/深色两套值。
+   - `accentColor()` 按预设 + 深浅模式返回；`todayColor()` 用 HSV 色相偏移（+42°）从主色派生，避免与 accent 混淆。
+   - 设置面板新增「外观 → 界面色调」入口（`showAccentColorDialog()` + `renderAccentChoices()`），点击色块保存并 `recreate()` 全局生效。
+   - 硬编码 accent 容器色（状态 chip、空状态导入按钮）统一改为 `accentContainerColor()`。
+   - 新增 drawable `ic_palette_outline.xml`；同步更新 `tools/compile-stubs/R.java` 存根。
+
+### 验证状态（已通过）
+
+- `tools/verify-logic.ps1`：TimetableRulesTest + PdfCourseParserTest + Android 编译检查全过。
+- `assembleDebug`：BUILD SUCCESSFUL；已安装到 MUMU（127.0.0.1:16384）。
+- 无崩溃（logcat crash buffer 无本应用记录）。
+- 自定义色调**像素级验证**：注入绿色预设（accent_preset=2）重启后，右上角添加按钮由 `#69B2FF`(105,178,255) 变为 `#6FD08A`(111,208,138)，日期 tab 选中区同步变绿，课程徽章不变；恢复默认后回蓝。
+- 注意：MUMU 上 `input tap` 坐标与视图树有偏移（content 起点 y=42，且旋转坐标映射异常），自动化点击不可靠；`uiautomator dump` 因应用持续刷新拿不到 idle。后续如需 UI 自动化，需先解决这两点。
+
+### 截图（build/emu-shots/）
+
+- `preview-play-style.png`：Play 风格（有课程状态）
+- `preview-empty-state.png`：空状态 CTA
+- `preview-accent-green.png`：绿色色调效果
+- `preview-restored-blue.png`：当前默认蓝（交付状态）
+
+### 待办 / 下一步
+
+- 等用户确认效果后提交本批次（建议拆两个 commit：UI 优化+Play 风格 / 自定义色调）。
+- 可选继续调整：卡片圆角/徽章渐变、日期 tab 药丸化、header 按钮加文字标签、`toggleTheme` 图标随 accent 换色。
+- 长期：`MainActivity` 其余职责（UI/校历/倒计时）尚未拆分。
+
+---
+
+## 2026-08-13 · 批次 5 后续（未提交）：UI 规范对齐与视觉改进
+
+**Git 提交**：`未提交`（工作区改动，待确认后提交）
+
+### 已完成改动
+
+1. **修复节次徽章“节”字被裁**
+   - 徽章高度由固定 56/64dp 改回 `WRAP_CONTENT`，垂直 padding 收窄到 8dp，保证“第 11 节”等两行内容完整显示。
+2. **色板无障碍与按压反馈**
+   - 新增 `ACCENT_PRESET_NAMES`、`COURSE_COLOR_NAMES`，为界面色调 7 个、课程颜色 10 个 swatch 补 `contentDescription`（选中态带“，已选”）。
+   - 新增 `swatchStateListBackground()`，色板按下变深。
+3. **空状态视觉与交互**
+   - 空状态由“大号日期文字”改为“日历矢量图标（accent 容器色底板）+ 标题 + 日期副标题 + CTA”。
+   - 两个 CTA 按钮补按压反馈：`addCta` 用 `interactiveButtonBackground`，`importCta` 用新增 `interactiveTranslucentBackground`（保留半透明容器色）。
+4. **头部图标风格统一**
+   - 主题切换按钮改用 outline 矢量图标 `ic_sun_outline` / `ic_moon_outline`，并用 `accentColor()` 动态着色，与设置/加号按钮风格一致。
+   - 删除不再使用的 `ic_sun_10_white.xml`、`ic_moon_deep_blue.xml`。
+5. **节次数字自适应缩放**
+   - 跨节次（如 `11-12`）或长数字时自动缩小 `periodNum` 字号，避免横向被裁。
+
+### 验证状态（已通过）
+
+- `tools/verify-logic.ps1`：逻辑测试 + Android 编译检查全过。
+- `gradlew assembleDebug`：BUILD SUCCESSFUL。
+- MUMU 重装后启动无崩溃。
+- 像素复核：header 旧深蓝月亮色（#123A63）像素数归零，accent 轮廓图标生效；徽章“节”字完整渲染。
+
+### 待办 / 下一步
+
+- 可继续：日期栏选中药丸化、卡片圆角/阴影层级统一、倒计时区域动效。
+- MUMU `input tap` 坐标与画面存在旋转映射偏移，UI 自动化点击仍不可靠，后续需先解决。
+
+### 补丁（2026-08-13，同日）
+
+- 修复切换界面色调后色盘短暂残留：选中色块后先 `dialog.dismiss()` 再 `recreate()`，避免对话框在 Activity 重建过程中多显示一会。
+
+### 风格方向（2026-08-13，同日）
+
+- 为贴近原生 Android，将全应用字体从自定义 `DengXian` 改为系统原生字体栈 `sans-serif`（Roboto + Noto Sans CJK），方法重命名为 `appTypeface()`。
+- 后续可选：Material 3 权重（标题/按钮用 `sans-serif-medium`）、给按钮补 ripple 按压波纹、统一 Material 形状与色板角色；iOS 风格不建议整体套用（平台不一致），但日期栏分段控件已具 iOS 观感。
+
+### 原生 Android 化补丁（2026-08-13，同日）
+
+- 交互：把 `interactiveSurfaceBackground` / `interactiveButtonBackground` / `interactiveGlassSurfaceBackground` 从自定义 `StateListDrawable` 换成框架 `RippleDrawable`，按钮/设置行/CTA 点击出现原生水波纹。
+- 语义色：删除按钮、警告区、状态 chip 的散落硬编码红/灰改为 `dangerColor()`、`dangerContainerColor()`、`withAlpha(secondaryTextColor())` 等语义角色；移除失效的 `pressedSurfaceColor`。
+- 组件语义（依赖说明）：`MaterialButton`/`CardView` 需要引入 `com.google.android.material:material` 与 AndroidX，而当前本地 Gradle 缓存无该依赖且环境离线，故本轮未引入；已用框架 Ripple + 语义色达到近似原生 Material 效果。
+
+### Material 组件化（2026-08-13，同日）
+
+- 引入依赖 `com.google.android.material:material:1.12.0`，并开启 `android.useAndroidX=true`。
+- 主题从框架 `Theme.Material.*` 迁移到 `Theme.Material3.Light/Dark.NoActionBar`（values / values-night / v27 / night-v27）。
+- `MainActivity` 由 `android.app.Activity` 迁移到 `androidx.appcompat.app.AppCompatActivity`。
+- 设置面板动作按钮由 `Button` 改为 `MaterialButton`（cornerRadius / stroke / ripple / inset）。
+- 空状态卡片由普通 `LinearLayout` 改为 `MaterialCardView`（cardBackgroundColor / radius / elevation / stroke）。
+- 为离线 `verify-logic.ps1` 增加 `AppCompatActivity`、`MaterialButton`、`MaterialCardView` 的 compile-stub，保证离线编译检查仍可运行。
+- 验证：`verify-logic.ps1` 通过，`assembleDebug` BUILD SUCCESSFUL，MUMU 重装启动无崩溃。
+
+---
+
+## 交接备忘（给下一个会话 / 明早继续）
+
+**状态**：本会话所有改动都还在**工作区未提交**。基线是之前 4 个 batch 的 git 提交，UI / Material 相关改动均未 commit。
+
+### 本会话已完成（可据此继续）
+1. 修复节次徽章“节”字被裁（高度 WRAP_CONTENT + padding 8）。
+2. 色板无障碍标签 + 按压态。
+3. 空状态升级：日历图标 + 标题 + 日期副标题 + 两个 CTA。
+4. 头部主题图标 outline + accent 着色。
+5. 节次数字自适应缩放。
+6. 全应用字体改系统原生 `sans-serif`（`appTypeface()`）。
+7. 交互背景改 `RippleDrawable`（涟漪按压）。
+8. 语义色整理（`dangerColor()` / `dangerContainerColor()` 等）。
+9. 引入 Material 1.12.0 + AndroidX：`AppCompatActivity` + `Theme.Material3.*`。
+10. 设置按钮 `MaterialButton`、空状态卡片 `MaterialCardView`。
+
+### 明早继续的优先项
+- 课程卡片换 `MaterialCardView`：注意 `createCourseCard` 现在用自定义 `BoundedFrameLayout` + `CourseProgressView` + foreground，替换时必须保留“进行中”进度层。
+- 对话框换 `MaterialAlertDialog`。
+- 继续语义色统一：`ClassReminderReceiver` 里的硬编码通知蓝可改为共享 accent。
+- 可选：日期栏选中态药丸化、倒计时区域动效。
+
+### 验证命令
+- 快速编译 + 逻辑测试：
+  `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\verify-logic.ps1`
+- 构建（首次需联网，之后可离线）：
+  `$env:JAVA_HOME='D:\Android Studio\jbr'; $env:ANDROID_HOME='D:\Android\Sdk'; $env:ANDROID_SDK_ROOT='D:\Android\Sdk'; $env:GRADLE_USER_HOME='D:\Android\Gradle'; .\gradlew.bat --no-daemon assembleDebug`
+- 离线构建加 `--offline`。
+
+### 注意事项
+- MUMU（`127.0.0.1:16384`）的 `input tap` 坐标与截图有旋转映射偏移，自动化点击不可靠；`uiautomator dump` 常因应用持续刷新拿不到 idle。
+- 已给 `tools/compile-stubs` 增加 androidx / material 的 compile-stub；若 MainActivity 再引用新的 Material 类，需同步补 stub，否则 `verify-logic.ps1` 离线编译检查会失败。
+- 全部改动未提交，建议确认效果后按主题拆分 commit。
+
+---
+
+## 2026-08-13 · 课程卡片 MaterialCardView 化 / 对话框 MaterialAlertDialog / 通知色共享
+
+**Git 提交**：`未提交`（工作区改动，随批次 5 一并提交）
+
+### 已完成的改动
+
+1. **课程卡片换 MaterialCardView**
+   - 自定义 `BoundedFrameLayout` 升级为 `BoundedMaterialCardView`（`MaterialCardView` 子类），保留 `onMeasure` 最大高度封顶逻辑；"进行中"进度层 `CourseProgressView` 仍作为子视图叠加，`COMPLETED` 状态不添加。
+   - 圆角/阴影/描边改用 Material API：`setRadius(28/24dp)`、`setCardElevation(5/1dp)`、`setStrokeWidth(1dp)`、`setStrokeColor`（进行中为半透明白，普通卡片为卡片色混合课程色）。
+   - 卡片背景统一走语义色：进行中用课程色实底，普通卡片为卡片色 + 课程色混色（深色 8% / 浅色 4%）。
+2. **对话框换 MaterialAlertDialogBuilder**
+   - 全部对话框构造改为 `MaterialAlertDialogBuilder`，适配 `Theme.Material3`。
+   - import 由 `android.app.AlertDialog` 切换为 `androidx.appcompat.app.AlertDialog`。
+   - 保留 `styleDialogWindow` 对确定/取消按钮的 accent 着色与字重设置。
+3. **通知色共享 accent**
+   - `ClassReminderReceiver` 通知 `setColor` 由硬编码 `Color.rgb(37, 99, 235)` 改为 `MainActivity.accentColorFor(context)`，跟随用户选择的界面色调（浅色/深色各自取值）。
+4. **补离线编译 stub**
+   - `tools/compile-stubs` 增加 `androidx.appcompat.app.AlertDialog` 与 `com.google.android.material.dialog.MaterialAlertDialogBuilder`。
+
+### 验证状态（已通过）
+
+- `verify-logic.ps1`：逻辑测试 + 全量 Android Java 编译检查通过。
+- `gradlew.bat --no-daemon --offline assembleDebug`：BUILD SUCCESSFUL。
+
+### 待办 / 下一步
+
+- 连同批次 5 其余 UI 改动，确认效果后按主题拆分 commit。
+
+---
+
+## 2026-08-13 · APP 图标（adaptive icon 完整化 + legacy 密度适配）
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 已完成的改动
+
+1. **manifest 图标引用修正**
+   - `AndroidManifest.xml` 的 `icon` / `roundIcon` 由 `@drawable/ic_launcher_foreground` 改回 `@mipmap/ic_launcher` / `@mipmap/ic_launcher_round`，adaptive icon 完整生效（含圆形图标）。
+2. **重绘 `ic_launcher_foreground.xml`**
+   - 前景重新设计：深青铃铛 ×2 + 米白日历卡片 + 黄色日历头 + 青色表格行，全部矢量 path 手绘。
+3. **重绘 `ic_launcher_background.xml`**
+   - 纯色背景与前景协调。
+4. **补充 legacy PNG**
+   - 新增 `mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/ic_launcher(.round).png`（48/72/96/144/192），覆盖 API 23-25。
+5. **验证产物**
+   - `assembleDebug` BUILD SUCCESSFUL；生成 `artifacts/icon-preview.png` 与 `artifacts/icon-preview-round.png` 预览图。
+
+---
+
+## 2026-08-13 · 对话框窗口样式统一
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 已完成的改动
+
+- 修复界面色调切换后对话框短暂残留：选中色块后先 `dialog.dismiss()` 再 `recreate()`（批次 5 补丁）。
+- `styleDialogWindow` 与 MaterialAlertDialog 的 Material3 按钮样式对齐，去掉自定义 `dp(2)` 边距带来的观感不一致。
+
+### 验证状态（已通过）
+
+- `verify-logic.ps1` 与 `assembleDebug` BUILD SUCCESSFUL，MUMU 实测对话框样式与页面主题一致。
+
+---
+
+## 2026-08-13 · 节次设置对话框滚动优化
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 已完成的改动
+
+- `showPeriodSettingsDialog` 的规则列表放入 `ScrollView`，高度上限约 `dp(300)` 并以 `weight=1` 占满剩余空间，规则多时不再溢出屏幕。
+- 节次按钮（恢复默认 1-11 节等）统一为 MaterialButton 50dp 高度。
+- MUMU 上 uiautomator 校验对话框 bounds（88px 高度对齐）。
+
+### 验证状态（已通过）
+
+- `verify-logic.ps1` 与 `assembleDebug` BUILD SUCCESSFUL。
+
+---
+
+## 2026-08-13 · 界面元素对齐微调
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 已完成的改动
+
+- 修复紧凑宽度下元素对齐：uiautomator 实测某行 y 坐标由 693 调整到 714（约 21px ≈ 12dp），使与相邻元素间距一致。
+- 间距统一为 12dp 级。
+
+### 验证状态（已通过）
+
+- `assembleDebug` BUILD SUCCESSFUL。
+
+---
+
+## 2026-08-13 · 通知总开关（SwitchCompat）
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 已完成的改动
+
+- 设置面板新增「课程提醒」总开关，使用 `androidx.appcompat.widget.SwitchCompat`。
+- 关闭（`notifications_enabled=false`）：先 `cancelScheduledClassReminders` 取消已排闹钟，再 `ReminderScheduler.clear` 清空提醒计划，并清除 `REMINDER_CODES_KEY` 记录；开启时重新 `scheduleClassReminderNotifications` 排程。
+- `scheduleClassReminderNotifications` 同步刷新设置里的 `notificationStatusText`。
+- 补离线编译 stub：`androidx.appcompat.widget.SwitchCompat`。
+
+### 验证状态（已通过）
+
+- `verify-logic.ps1` 与 `assembleDebug` BUILD SUCCESSFUL，MUMU 实测开关 true/false 生效。
+
+---
+
+## 2026-08-13 · MUMU 旋转/分辨率适配（compact 宽度）
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 已完成的改动
+
+- MUMU 模拟器处于 `rotation=1`（横屏），通过 adb `wm size 1080x720` 使宽度 411dp，落入紧凑模式（compact）。
+- 为 compact 模式收紧卡片内边距/字号/徽章尺寸，按钮高度 88px 级对齐。
+- 发现 MaterialAlertDialog 在 `values-night` 下按系统深色渲染，但应用 `isDarkMode=false` 时对话框与页面主题不一致（见下一条）。
+
+---
+
+## 2026-08-13 · 修正 App 深色模式与对话框主题不一致
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 已完成的改动
+
+- 根因：`values-night` 资源按系统深色生效，而应用强制浅色时 `isDarkMode=false`，MaterialAlertDialog 仍取深色资源。
+- 修复：`onCreate` 中调用 `AppCompatDelegate.setDefaultNightMode(...)`，将 `theme_mode`（0=跟随系统 / 1=MODE_NIGHT_NO / 2=MODE_NIGHT_YES）同步给 AppCompat，使对话框与应用主题一致。
+- 补离线编译 stub：`androidx.appcompat.app.AppCompatDelegate`。
+
+### 验证状态（已通过）
+
+- `verify-logic.ps1` 与 `assembleDebug` BUILD SUCCESSFUL，MUMU 实测背景色由深色 `(43,41,48)` 切回浅色 `(~238-248)`。
