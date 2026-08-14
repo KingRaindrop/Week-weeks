@@ -8,7 +8,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 
@@ -80,7 +79,7 @@ public class ClassReminderReceiver extends BroadcastReceiver {
                 .setStyle(new Notification.BigTextStyle().bigText(content))
                 .setContentIntent(contentIntent)
                 .setAutoCancel(true)
-                .setColor(Color.rgb(37, 99, 235))
+                .setColor(MainActivity.accentColorFor(context))
                 .setCategory(Notification.CATEGORY_REMINDER)
                 .setDefaults(Notification.DEFAULT_SOUND | Notification.DEFAULT_VIBRATE)
                 .setPriority(Notification.PRIORITY_HIGH)

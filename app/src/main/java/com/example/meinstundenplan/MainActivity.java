@@ -39,6 +39,10 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -152,6 +156,10 @@ public class MainActivity extends AppCompatActivity {
             Color.rgb(145, 91, 119),
             Color.rgb(118, 113, 79)
     };
+    private static final String[] COURSE_COLOR_NAMES = {
+            "\u9752\u8272", "\u84dd\u8272", "\u7eff\u8272", "\u7d2b\u8272", "\u9676\u571f\u7ea2",
+            "\u8d6d\u9ec4", "\u58a8\u7eff", "\u84dd\u7070", "\u73ab\u7470\u7ea2", "\u6a44\u6984\u7eff"
+    };
     private final SecureStorage secureStorage = new SecureStorage("mein_stundenplan_courses_key");
     private final List<Course> courses = new ArrayList<>();
     private final List<String> periodTimes = new ArrayList<>();
@@ -172,6 +180,7 @@ public class MainActivity extends AppCompatActivity {
     private LinearLayout dayTabs;
     private LinearLayout courseList;
     private TextView summaryText;
+    private TextView statusChip;
     private ImageButton themeToggle;
     private View settingsOverlay;
     private int selectedDay = 0;
@@ -191,6 +200,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        applyAppNightMode();
         super.onCreate(savedInstanceState);
         loadThemeMode();
         loadPeriodTimes();
@@ -403,6 +413,19 @@ public class MainActivity extends AppCompatActivity {
         return ((day % length) + length) % length;
     }
 
+    private void applyAppNightMode() {
+        int savedMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(THEME_KEY, 0);
+        int nightMode;
+        if (savedMode == 2) {
+            nightMode = AppCompatDelegate.MODE_NIGHT_YES;
+        } else if (savedMode == 1) {
+            nightMode = AppCompatDelegate.MODE_NIGHT_NO;
+        } else {
+            nightMode = AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM;
+        }
+        AppCompatDelegate.setDefaultNightMode(nightMode);
+    }
+
     private void loadThemeMode() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         int savedMode = prefs.getInt(THEME_KEY, 0);
@@ -476,7 +499,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void scheduleClassReminderNotifications() {
-        if (storageLocked) {
+        if (storageLocked || !notificationsEnabled()) {
             return;
         }
         android.app.AlarmManager alarmManager = (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
@@ -677,16 +700,16 @@ public class MainActivity extends AppCompatActivity {
         title.setText("我的课表");
         title.setTextColor(primaryTextColor());
         title.setTextSize(compact ? 28 : 32);
-        title.setTypeface(dengXian(Typeface.BOLD));
+        title.setTypeface(appTypeface(Typeface.BOLD));
         title.setLetterSpacing(0f);
         titleBlock.addView(title);
 
         summaryText = new TextView(this);
         summaryText.setTextColor(secondaryTextColor());
         summaryText.setTextSize(15);
-        summaryText.setTypeface(dengXian(Typeface.NORMAL));
+        summaryText.setTypeface(appTypeface(Typeface.NORMAL));
         summaryText.setAlpha(0.85f);
-        summaryText.setMaxLines(2);
+        summaryText.setSingleLine(true);
         summaryText.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams summaryParams = new LinearLayout.LayoutParams(
                 compact ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -694,6 +717,21 @@ public class MainActivity extends AppCompatActivity {
         );
         summaryParams.setMargins(0, dp(4), 0, 0);
         titleBlock.addView(summaryText, summaryParams);
+
+        statusChip = new TextView(this);
+        statusChip.setTextSize(13);
+        statusChip.setTypeface(appTypeface(Typeface.BOLD));
+        statusChip.setSingleLine(true);
+        statusChip.setEllipsize(TextUtils.TruncateAt.END);
+        statusChip.setIncludeFontPadding(false);
+        statusChip.setGravity(Gravity.CENTER);
+        statusChip.setPadding(dp(10), dp(4), dp(10), dp(4));
+        LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        chipParams.setMargins(0, dp(8), 0, 0);
+        titleBlock.addView(statusChip, chipParams);
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -708,8 +746,8 @@ public class MainActivity extends AppCompatActivity {
 
         // 主题切换按钮
         themeToggle = new ImageButton(this);
-        themeToggle.setImageResource(isDarkMode ? R.drawable.ic_sun_10_white : R.drawable.ic_moon_deep_blue);
-        themeToggle.setImageTintList(null);
+        themeToggle.setImageResource(isDarkMode ? R.drawable.ic_sun_outline : R.drawable.ic_moon_outline);
+        themeToggle.setImageTintList(ColorStateList.valueOf(accentColor()));
         themeToggle.setScaleType(android.widget.ImageView.ScaleType.CENTER);
         themeToggle.setContentDescription(isDarkMode ? "切换到亮色模式" : "切换到暗黑模式");
         themeToggle.setBackground(interactiveSurfaceBackground(cardColor(), dp(22)));
@@ -818,13 +856,32 @@ public class MainActivity extends AppCompatActivity {
         }
         summaryText.setText(String.format(
                 Locale.CHINA,
-                "%s%s · %d 门课 · %s",
+                "%s%s · %d 门课",
                 weekText,
                 DAYS[selectedDay],
-                count,
-                statusText
+                count
         ));
+        updateStatusChip(currentCourse != null || nextCourse != null ? statusText : null);
         renderedTemporalSignature = temporalSignature();
+    }
+
+    private void updateStatusChip(String statusText) {
+        if (statusChip == null) {
+            return;
+        }
+        boolean hasStatus = statusText != null && !statusText.isEmpty();
+        statusChip.setText(hasStatus ? statusText : "\u6682\u65e0\u540e\u7eed\u8bfe\u7a0b");
+        int chipBg;
+        int chipFg;
+        if (hasStatus) {
+            chipBg = accentContainerColor();
+            chipFg = accentColor();
+        } else {
+            chipBg = withAlpha(secondaryTextColor(), isDarkMode ? 44 : 22);
+            chipFg = secondaryTextColor();
+        }
+        statusChip.setBackground(buttonBackground(chipBg, dp(10)));
+        statusChip.setTextColor(chipFg);
     }
 
     private void refreshTimedUi() {
@@ -922,9 +979,9 @@ public class MainActivity extends AppCompatActivity {
             boolean isSelected = day == selectedDay;
 
             if (isSelected) {
-                textColor = Color.WHITE;
-            } else if (isToday) {
                 textColor = accentColor();
+            } else if (isToday) {
+                textColor = todayColor();
             } else {
                 textColor = secondaryTextColor();
             }
@@ -940,7 +997,7 @@ public class MainActivity extends AppCompatActivity {
             dayText.setText(DAYS[i]);
             dayText.setTextSize(compact ? 15 : 16);
             dayText.setGravity(Gravity.CENTER);
-            dayText.setTypeface(dengXian(Typeface.BOLD));
+            dayText.setTypeface(appTypeface(Typeface.BOLD));
             dayText.setTextColor(textColor);
             tabContainer.addView(dayText);
 
@@ -1004,7 +1061,7 @@ public class MainActivity extends AppCompatActivity {
         params.width = selectedTab.getWidth();
         params.height = selectedTab.getHeight();
         daySelectionSlider.setLayoutParams(params);
-        daySelectionSlider.setBackground(elevatedCardBackground(todayColor(), dp(20)));
+        daySelectionSlider.setBackground(elevatedCardBackground(tonalContainerColor(), dp(20)));
 
         float target = selectedTab.getLeft();
         daySelectionSlider.animate().cancel();
@@ -1052,9 +1109,9 @@ public class MainActivity extends AppCompatActivity {
             TextView warning = new TextView(this);
             warning.setText("⚠️ 加密课表无法读取\n\n为避免覆盖原数据，已暂停保存。\n请检查系统密钥或清除应用数据后重新开始。");
             warning.setTextSize(15);
-            warning.setTextColor(Color.rgb(220, 38, 38));
+            warning.setTextColor(dangerColor());
             warning.setGravity(Gravity.CENTER);
-            warning.setBackground(elevatedCardBackground(isDarkMode ? Color.rgb(60, 20, 20) : Color.rgb(254, 242, 242), dp(16)));
+            warning.setBackground(elevatedCardBackground(dangerContainerColor(), dp(16)));
             warning.setPadding(dp(24), dp(32), dp(24), dp(32));
             warning.setLineSpacing(dp(4), 1.0f);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
@@ -1197,13 +1254,20 @@ public class MainActivity extends AppCompatActivity {
         boolean compact = isCompactWidth();
         int minHeightDp = active ? (compact ? 142 : 150) : (compact ? 92 : 100);
         int maxHeightDp = active ? (compact ? 158 : 168) : (compact ? 122 : 132);
-        BoundedFrameLayout shell = new BoundedFrameLayout(this);
+        BoundedMaterialCardView shell = new BoundedMaterialCardView(this);
         shell.setMinimumHeight(dp(minHeightDp));
         shell.setMaxHeightPx(dp(maxHeightDp));
-        shell.setBackground(active ? activeCourseBackground(course.color, dp(28)) : courseCardBackground(course.color, dp(18)));
+        shell.setRadius(dp(active ? 28 : 24));
+        shell.setCardElevation(dp(active ? 5 : 1));
+        shell.setCardBackgroundColor(active
+                ? course.color
+                : mixColor(cardColor(), course.color, isDarkMode ? 0.08f : 0.04f));
+        shell.setStrokeWidth(dp(1));
+        shell.setStrokeColor(active
+                ? Color.argb(90, 255, 255, 255)
+                : mixColor(borderColor(), course.color, isDarkMode ? 0.20f : 0.12f));
         shell.setClipChildren(true);
         shell.setClipToPadding(true);
-        shell.setElevation(dp(active ? 11 : 4));
         shell.setClipToOutline(true);
         shell.setClickable(false);
 
@@ -1235,18 +1299,26 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout badge = new LinearLayout(this);
         badge.setOrientation(LinearLayout.VERTICAL);
         badge.setGravity(Gravity.CENTER);
-        badge.setPadding(dp(compact ? 10 : 12), dp(compact ? 14 : 16), dp(compact ? 10 : 12), dp(compact ? 14 : 16));
-        badge.setBackground(buttonBackground(active ? Color.argb(64, 255, 255, 255) : course.color, dp(active ? 18 : 12)));
+        badge.setPadding(dp(compact ? 10 : 12), dp(8), dp(compact ? 10 : 12), dp(8));
+        badge.setBackground(buttonBackground(active ? Color.argb(64, 255, 255, 255) : course.color, dp(active ? 20 : 16)));
 
         TextView periodNum = new TextView(this);
+        String periodNumText;
         if (course.endPeriod > course.period) {
-            periodNum.setText(String.format(Locale.CHINA, "%d-%d", course.period, course.endPeriod));
+            periodNumText = String.format(Locale.CHINA, "%d-%d", course.period, course.endPeriod);
         } else {
-            periodNum.setText(String.valueOf(course.period));
+            periodNumText = String.valueOf(course.period);
         }
+        periodNum.setText(periodNumText);
         periodNum.setTextColor(active ? Color.WHITE : Color.WHITE);
-        periodNum.setTypeface(dengXian(Typeface.BOLD));
-        periodNum.setTextSize(active ? (compact ? 21 : 22) : (compact ? 19 : 20));
+        periodNum.setTypeface(appTypeface(Typeface.BOLD));
+        float periodNumSize = active ? (compact ? 21 : 22) : (compact ? 19 : 20);
+        if (periodNumText.length() >= 5) {
+            periodNumSize = active ? (compact ? 14 : 15) : (compact ? 13 : 14);
+        } else if (periodNumText.length() >= 3) {
+            periodNumSize = active ? (compact ? 16 : 17) : (compact ? 15 : 16);
+        }
+        periodNum.setTextSize(periodNumSize);
         periodNum.setLetterSpacing(0f);
         periodNum.setGravity(Gravity.CENTER);
         periodNum.setSingleLine(true);
@@ -1260,7 +1332,7 @@ public class MainActivity extends AppCompatActivity {
         periodLabel.setText("节");
         periodLabel.setTextColor(Color.WHITE);
         periodLabel.setTextSize(12);
-        periodLabel.setTypeface(dengXian(Typeface.NORMAL));
+        periodLabel.setTypeface(appTypeface(Typeface.NORMAL));
         periodLabel.setAlpha(active ? 0.95f : 0.9f);
         periodLabel.setGravity(Gravity.CENTER);
         periodLabel.setIncludeFontPadding(false);
@@ -1271,7 +1343,7 @@ public class MainActivity extends AppCompatActivity {
         labelParams.setMargins(0, dp(2), 0, 0);
         badge.addView(periodLabel, labelParams);
 
-        card.addView(badge, new LinearLayout.LayoutParams(dp(active ? (compact ? 66 : 74) : (compact ? 58 : 64)), ViewGroup.LayoutParams.WRAP_CONTENT));
+        card.addView(badge, new LinearLayout.LayoutParams(dp(active ? 64 : 56), ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // 中间课程信息
         LinearLayout info = new LinearLayout(this);
@@ -1286,7 +1358,7 @@ public class MainActivity extends AppCompatActivity {
         name.setText(course.name);
         name.setTextColor(active ? Color.WHITE : primaryTextColor());
         name.setTextSize(active ? (compact ? 20 : 21) : (compact ? 17 : 18));
-        name.setTypeface(dengXian(Typeface.BOLD));
+        name.setTypeface(appTypeface(Typeface.BOLD));
         name.setLetterSpacing(0f);
         name.setMaxLines(active ? 1 : 2);
         name.setEllipsize(TextUtils.TruncateAt.END);
@@ -1294,16 +1366,21 @@ public class MainActivity extends AppCompatActivity {
 
         TextView time = new TextView(this);
         time.setText(periodRangeTime(course));
-        time.setTextColor(active ? Color.argb(230, 255, 255, 255) : accentColor());
-        time.setTextSize(active ? (compact ? 14 : 15) : 14);
-        time.setTypeface(dengXian(Typeface.BOLD));
+        time.setTextColor(active ? Color.WHITE : accentColor());
+        time.setTextSize(12);
+        time.setTypeface(appTypeface(Typeface.BOLD));
         time.setSingleLine(true);
         time.setEllipsize(TextUtils.TruncateAt.END);
+        time.setIncludeFontPadding(false);
+        time.setGravity(Gravity.CENTER);
+        time.setPadding(dp(9), dp(4), dp(9), dp(4));
+        time.setBackground(buttonBackground(
+                active ? Color.argb(40, 255, 255, 255) : tonalContainerColor(), dp(9)));
         LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        timeParams.setMargins(0, dp(4), 0, 0);
+        timeParams.setMargins(0, dp(6), 0, 0);
         info.addView(time, timeParams);
 
         if (active) {
@@ -1323,7 +1400,7 @@ public class MainActivity extends AppCompatActivity {
             detail.setText(secondary);
             detail.setTextColor(active ? Color.WHITE : secondaryTextColor());
             detail.setTextSize(active ? (compact ? 14 : 15) : 14);
-            detail.setTypeface(dengXian(Typeface.NORMAL));
+            detail.setTypeface(appTypeface(Typeface.NORMAL));
             detail.setAlpha(active ? 0.88f : 0.85f);
             detail.setSingleLine(true);
             detail.setEllipsize(TextUtils.TruncateAt.END);
@@ -1426,7 +1503,7 @@ public class MainActivity extends AppCompatActivity {
         TextView text = new TextView(this);
         text.setTextColor(Color.argb(245, 255, 255, 255));
         text.setTextSize(compact ? 14 : 15);
-        text.setTypeface(dengXian(Typeface.BOLD));
+        text.setTypeface(appTypeface(Typeface.BOLD));
         text.setGravity(Gravity.CENTER_VERTICAL);
         text.setIncludeFontPadding(false);
         text.setSingleLine(true);
@@ -1886,7 +1963,7 @@ public class MainActivity extends AppCompatActivity {
         temporaryWeeksButton.setAllCaps(false);
         temporaryWeeksButton.setTextColor(accentColor());
         temporaryWeeksButton.setTextSize(14);
-        temporaryWeeksButton.setTypeface(dengXian(Typeface.BOLD));
+        temporaryWeeksButton.setTypeface(appTypeface(Typeface.BOLD));
         temporaryWeeksButton.setBackground(elevatedCardBackground(cardColor(), dp(12)));
         temporaryWeeksButton.setPadding(dp(12), 0, dp(12), 0);
         temporaryWeeksButton.setOnClickListener(view -> showTemporaryWeeksDialog(weeksInput));
@@ -1935,7 +2012,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }));
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(isEditing ? "编辑课程" : "添加课程")
                 .setView(formScroll)
                 .setNegativeButton("取消", null)
@@ -1984,7 +2061,7 @@ public class MainActivity extends AppCompatActivity {
             if (isEditing) {
                 Button delete = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
                 if (delete != null) {
-                    delete.setTextColor(Color.rgb(180, 58, 47));
+                    delete.setTextColor(dangerColor());
                 }
             }
         });
@@ -2024,7 +2101,7 @@ public class MainActivity extends AppCompatActivity {
         durationInput.setPadding(dp(14), dp(10), dp(14), dp(10));
         durationInput.setBackground(elevatedCardBackground(cardColor(), dp(12)));
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("临时课程周数")
                 .setMessage("从当前第 " + currentWeek + " 周开始，只上 N 周。")
                 .setView(durationInput)
@@ -2111,7 +2188,7 @@ public class MainActivity extends AppCompatActivity {
         TextView title = new TextView(this);
         title.setText("\u8bbe\u7f6e");
         title.setTextSize(22);
-        title.setTypeface(dengXian(Typeface.BOLD));
+        title.setTypeface(appTypeface(Typeface.BOLD));
         title.setTextColor(primaryTextColor());
         title.setIncludeFontPadding(false);
         titleRow.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -2119,7 +2196,7 @@ public class MainActivity extends AppCompatActivity {
         TextView close = new TextView(this);
         close.setText("\u5173\u95ed");
         close.setTextSize(13);
-        close.setTypeface(dengXian(Typeface.BOLD));
+        close.setTypeface(appTypeface(Typeface.BOLD));
         close.setTextColor(accentColor());
         close.setGravity(Gravity.CENTER);
         close.setMinWidth(dp(58));
@@ -2165,6 +2242,15 @@ public class MainActivity extends AppCompatActivity {
                 }
         ), settingsRowParams());
 
+        panel.addView(settingsToggleRow(
+                R.drawable.ic_bell,
+                "\u8bfe\u7a0b\u63d0\u9192",
+                "\u5f00\u542f\u540e\u6309\u8bfe\u8868\u5728\u4e0a\u8bfe\u524d\u53d1\u9001\u63d0\u9192\u901a\u77e5",
+                accentColor(),
+                notificationsEnabled(),
+                (buttonView, isChecked) -> applyNotificationToggle(isChecked)
+        ), settingsRowParams());
+
         panel.addView(settingsSectionLabel("\u65f6\u95f4"));
         panel.addView(settingsMenuRow(R.drawable.ic_clock_outline, "\u8bfe\u7a0b\u8282\u6b21\u8bbe\u7f6e", "\u8bbe\u7f6e\u7b2c 1 \u8282\u5230\u7b2c N \u8282\u7684\u65f6\u95f4", accentColor(), view -> {
             dismissSettings[0].run();
@@ -2173,6 +2259,11 @@ public class MainActivity extends AppCompatActivity {
         panel.addView(settingsMenuRow(R.drawable.ic_calendar_outline, "\u6821\u5386\u8bbe\u7f6e", "\u8bbe\u7f6e\u5f00\u5b66\u65e5\u548c\u6563\u5b66\u65e5", accentColor(), view -> {
             dismissSettings[0].run();
             showCalendarImportDialog();
+        }), settingsRowParams());
+
+        panel.addView(settingsSectionLabel("\u5916\u89c2"));
+        panel.addView(settingsMenuRow(R.drawable.ic_palette_outline, "\u754c\u9762\u8272\u8c03", "\u9009\u62e9\u4e3b\u8272\u8c03\uff0c\u5168\u5c40\u751f\u6548", accentColor(), view -> {
+            showAccentColorDialog();
         }), settingsRowParams());
 
         panel.addView(settingsSectionLabel("\u6570\u636e"));
@@ -2300,7 +2391,7 @@ public class MainActivity extends AppCompatActivity {
         title.setText(titleText);
         title.setTextColor(primaryTextColor());
         title.setTextSize(15);
-        title.setTypeface(dengXian(Typeface.BOLD));
+        title.setTypeface(appTypeface(Typeface.BOLD));
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
         texts.addView(title);
@@ -2309,7 +2400,7 @@ public class MainActivity extends AppCompatActivity {
         subtitle.setText(subtitleText);
         subtitle.setTextColor(secondaryTextColor());
         subtitle.setTextSize(11);
-        subtitle.setTypeface(dengXian(Typeface.NORMAL));
+        subtitle.setTypeface(appTypeface(Typeface.NORMAL));
         subtitle.setSingleLine(true);
         subtitle.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
@@ -2331,6 +2422,64 @@ public class MainActivity extends AppCompatActivity {
         return row;
     }
 
+    private LinearLayout settingsToggleRow(int iconResId, String titleText, String subtitleText, int tintColor, boolean checked, android.widget.CompoundButton.OnCheckedChangeListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(60));
+        row.setPadding(dp(12), dp(9), dp(10), dp(9));
+        row.setBackground(interactiveGlassSurfaceBackground(glassRowColor(), dp(16)));
+
+        FrameLayout iconSurface = new FrameLayout(this);
+        iconSurface.setBackground(buttonBackground(glassIconTintColor(tintColor), dp(12)));
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(iconResId);
+        icon.setImageTintList(ColorStateList.valueOf(tintColor));
+        icon.setScaleType(ImageView.ScaleType.CENTER);
+        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        iconSurface.addView(icon, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(38), dp(38));
+        iconParams.setMargins(0, 0, dp(10), 0);
+        row.addView(iconSurface, iconParams);
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = new TextView(this);
+        title.setText(titleText);
+        title.setTextColor(primaryTextColor());
+        title.setTextSize(15);
+        title.setTypeface(appTypeface(Typeface.BOLD));
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        texts.addView(title);
+        TextView subtitle = new TextView(this);
+        subtitle.setText(subtitleText);
+        subtitle.setTextColor(secondaryTextColor());
+        subtitle.setTextSize(11);
+        subtitle.setTypeface(appTypeface(Typeface.NORMAL));
+        subtitle.setSingleLine(true);
+        subtitle.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        subtitleParams.setMargins(0, dp(3), 0, 0);
+        texts.addView(subtitle, subtitleParams);
+        row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        SwitchCompat toggle = new SwitchCompat(this);
+        toggle.setChecked(checked);
+        toggle.setContentDescription(titleText);
+        toggle.setOnCheckedChangeListener(listener);
+        row.addView(toggle, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        return row;
+    }
+
     private LinearLayout.LayoutParams settingsRowParams() {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2342,6 +2491,10 @@ public class MainActivity extends AppCompatActivity {
 
     private int dangerColor() {
         return isDarkMode ? Color.rgb(244, 128, 112) : Color.rgb(177, 67, 55);
+    }
+
+    private int dangerContainerColor() {
+        return isDarkMode ? Color.rgb(60, 20, 20) : Color.rgb(254, 242, 242);
     }
 
     private int softTintColor(int color) {
@@ -2389,19 +2542,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void styleDialogWindow(AlertDialog dialog) {
-        Window dialogWindow = dialog.getWindow();
-        if (dialogWindow != null) {
-            dialogWindow.setBackgroundDrawable(elevatedCardBackground(cardColor(), dp(2)));
-        }
         Button positive = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         if (positive != null) {
             positive.setTextColor(accentColor());
-            positive.setTypeface(dengXian(Typeface.BOLD));
+            positive.setTypeface(appTypeface(Typeface.BOLD));
         }
         Button negative = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
         if (negative != null) {
             negative.setTextColor(positive == null ? accentColor() : secondaryTextColor());
-            negative.setTypeface(dengXian(Typeface.BOLD));
+            negative.setTypeface(appTypeface(Typeface.BOLD));
         }
     }
 
@@ -2410,7 +2559,7 @@ public class MainActivity extends AppCompatActivity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(4), dp(8), dp(4), 0);
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("设置")
                 .setView(panel)
                 .setNegativeButton("关闭", null)
@@ -2455,7 +2604,7 @@ public class MainActivity extends AppCompatActivity {
         dividerParams.setMargins(0, dp(12), 0, dp(12));
         panel.addView(divider, dividerParams);
 
-        Button deleteConfig = settingsActionButton("删除当前配置", Color.rgb(180, 58, 47));
+        Button deleteConfig = settingsActionButton("删除当前配置", dangerColor());
         deleteConfig.setOnClickListener(view -> {
             dialog.dismiss();
             confirmDeleteCurrentConfiguration();
@@ -2480,18 +2629,22 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         scrollView.addView(list);
-        panel.addView(scrollView, new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(300)
-        ));
+                0
+        );
+        scrollParams.weight = 1f;
+        panel.addView(scrollView, scrollParams);
 
         Button addRule = settingsActionButton("添加节次规则", accentColor());
-        panel.addView(addRule, fieldParams());
+        LinearLayout.LayoutParams addRuleParams = fieldParams();
+        addRuleParams.topMargin = dp(12);
+        panel.addView(addRule, addRuleParams);
 
         Button resetDefault = settingsActionButton("恢复默认 1-11 节", secondaryTextColor());
         panel.addView(resetDefault, fieldParams());
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("课程节次设置")
                 .setView(panel)
                 .setNegativeButton("取消", null)
@@ -2586,7 +2739,7 @@ public class MainActivity extends AppCompatActivity {
         if (!TextUtils.isEmpty(room)) {
             message.append("\n").append("\u5730\u70b9\uff1a").append(room.trim());
         }
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle(courseName)
                 .setMessage(message.toString())
                 .setPositiveButton("\u77e5\u9053\u4e86", null)
@@ -2620,7 +2773,7 @@ public class MainActivity extends AppCompatActivity {
         form.addView(label("结束时间"));
         form.addView(endInput, fieldParams());
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
                 .setTitle(editing ? "第 " + (index + 1) + " 节" : "添加节次规则")
                 .setView(form)
                 .setNegativeButton("取消", null)
@@ -2821,6 +2974,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String notificationStatusText() {
+        if (!notificationsEnabled()) {
+            return "\u5df2\u5173\u95ed\uff0c\u53ef\u5728\u4e0b\u65b9\u5f00\u542f";
+        }
         if (android.os.Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -2915,21 +3071,27 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private Button settingsActionButton(String text, int textColor) {
-        Button button = new Button(this);
+        MaterialButton button = new MaterialButton(this);
         button.setText(text);
         button.setAllCaps(false);
         button.setTextColor(textColor);
         button.setTextSize(15);
-        button.setTypeface(dengXian(Typeface.BOLD));
+        button.setTypeface(appTypeface(Typeface.BOLD));
         button.setGravity(Gravity.CENTER_VERTICAL);
         button.setMinHeight(dp(50));
-        button.setBackground(elevatedCardBackground(cardColor(), dp(14)));
+        button.setInsetTop(0);
+        button.setInsetBottom(0);
+        button.setCornerRadius(dp(14));
+        button.setBackgroundColor(cardColor());
+        button.setStrokeColor(ColorStateList.valueOf(borderColor()));
+        button.setStrokeWidth(dp(1));
+        button.setRippleColor(ColorStateList.valueOf(withAlpha(accentColor(), isDarkMode ? 72 : 36)));
         button.setPadding(dp(16), 0, dp(16), 0);
         return button;
     }
 
     private void confirmDeleteCurrentConfiguration() {
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("删除当前配置")
                 .setMessage("这会删除已保存的课程、校历设置和提醒排程。亮暗模式不会被删除。")
                 .setNegativeButton("取消", null)
@@ -3266,7 +3428,7 @@ public class MainActivity extends AppCompatActivity {
             preview.append("... 还有 ").append(parsedCourses.size() - 5).append(" 门");
         }
 
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
             .setTitle("步骤2: 课程解析结果")
             .setMessage(preview.toString())
             .setPositiveButton("确认导入", (dialog, which) -> {
@@ -3307,7 +3469,7 @@ public class MainActivity extends AppCompatActivity {
                     result += "，自动删除过期 " + removedExpired + " 门";
                 }
                 if (skipped > 0 && skipLog.length() > 0) {
-                    new AlertDialog.Builder(MainActivity.this)
+                    new MaterialAlertDialogBuilder(MainActivity.this)
                         .setTitle(result)
                         .setMessage("跳过原因:\n" + skipLog.toString())
                         .setPositiveButton("确定", null)
@@ -3377,15 +3539,17 @@ public class MainActivity extends AppCompatActivity {
 
     private void renderColorChoices(LinearLayout row, int[] selectedColor, Runnable onSelect) {
         row.removeAllViews();
-        for (int color : COURSE_COLORS) {
+        for (int colorIndex = 0; colorIndex < COURSE_COLORS.length; colorIndex++) {
+            int color = COURSE_COLORS[colorIndex];
             TextView swatch = new TextView(this);
             boolean selected = color == selectedColor[0];
             swatch.setText(selected ? "\u2713" : "");
             swatch.setTextColor(Color.WHITE);
             swatch.setTextSize(18);
-            swatch.setTypeface(dengXian(Typeface.BOLD));
+            swatch.setTypeface(appTypeface(Typeface.BOLD));
             swatch.setGravity(Gravity.CENTER);
-            swatch.setBackground(colorSwatchBackground(color, selected));
+            swatch.setBackground(swatchStateListBackground(color, selected));
+            swatch.setContentDescription(COURSE_COLOR_NAMES[colorIndex] + (selected ? "\uff0c\u5df2\u9009" : ""));
             swatch.setOnClickListener(view -> {
                 selectedColor[0] = color;
                 if (onSelect != null) {
@@ -3862,7 +4026,7 @@ public class MainActivity extends AppCompatActivity {
         TextView text = (TextView) view;
         text.setTextColor(primaryTextColor());
         text.setTextSize(dropdown ? 15 : 16);
-        text.setTypeface(dengXian(Typeface.NORMAL));
+        text.setTypeface(appTypeface(Typeface.NORMAL));
         text.setGravity(Gravity.CENTER_VERTICAL);
         text.setSingleLine(true);
         text.setEllipsize(TextUtils.TruncateAt.END);
@@ -3877,7 +4041,7 @@ public class MainActivity extends AppCompatActivity {
         TextView label = new TextView(this);
         label.setText(text);
         label.setTextSize(13);
-        label.setTypeface(dengXian(Typeface.BOLD));
+        label.setTypeface(appTypeface(Typeface.BOLD));
         label.setTextColor(secondaryTextColor());
         label.setPadding(0, dp(8), 0, dp(4));
         return label;
@@ -3906,38 +4070,26 @@ public class MainActivity extends AppCompatActivity {
         return params;
     }
 
-    private android.graphics.drawable.StateListDrawable interactiveSurfaceBackground(int color, int radius) {
-        android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
-        states.addState(
-                new int[]{android.R.attr.state_pressed},
-                roundedSurface(pressedSurfaceColor(color), radius, borderColor())
-        );
-        states.addState(new int[]{}, roundedSurface(color, radius, borderColor()));
-        return states;
+    private android.graphics.drawable.Drawable interactiveSurfaceBackground(int color, int radius) {
+        return rippleBackground(color, withAlpha(accentColor(), isDarkMode ? 72 : 36), radius, borderColor());
     }
 
-    private android.graphics.drawable.StateListDrawable interactiveButtonBackground(int color, int radius) {
-        android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
-        states.addState(
-                new int[]{android.R.attr.state_pressed},
-                roundedSurface(pressedButtonColor(color), radius, Color.TRANSPARENT)
-        );
-        states.addState(new int[]{}, roundedSurface(color, radius, Color.TRANSPARENT));
-        return states;
+    private android.graphics.drawable.Drawable interactiveButtonBackground(int color, int radius) {
+        return rippleBackground(color, Color.argb(64, 255, 255, 255), radius, Color.TRANSPARENT);
     }
 
-    private android.graphics.drawable.StateListDrawable interactiveGlassSurfaceBackground(int color, int radius) {
-        android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
-        int pressed = withAlpha(
-                mixColor(color, isDarkMode ? Color.WHITE : Color.BLACK, isDarkMode ? 0.10f : 0.04f),
-                Math.min(230, Color.alpha(color) + 32)
+    private android.graphics.drawable.Drawable interactiveGlassSurfaceBackground(int color, int radius) {
+        return rippleBackground(color, withAlpha(accentColor(), isDarkMode ? 72 : 36), radius, glassBorderColor());
+    }
+
+    private android.graphics.drawable.Drawable rippleBackground(int contentColor, int rippleColor, int radius, int strokeColor) {
+        GradientDrawable content = roundedSurface(contentColor, radius, strokeColor);
+        GradientDrawable mask = roundedSurface(Color.WHITE, radius, Color.TRANSPARENT);
+        return new android.graphics.drawable.RippleDrawable(
+                ColorStateList.valueOf(rippleColor),
+                content,
+                mask
         );
-        states.addState(
-                new int[]{android.R.attr.state_pressed},
-                roundedSurface(pressed, radius, glassBorderColor())
-        );
-        states.addState(new int[]{}, roundedSurface(color, radius, glassBorderColor()));
-        return states;
     }
 
     private GradientDrawable roundedSurface(int color, int radius, int strokeColor) {
@@ -3975,30 +4127,31 @@ public class MainActivity extends AppCompatActivity {
         return drawable;
     }
 
+    private android.graphics.drawable.StateListDrawable swatchStateListBackground(int color, boolean selected) {
+        android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_pressed}, colorSwatchBackground(pressedButtonColor(color), selected));
+        states.addState(new int[]{}, colorSwatchBackground(color, selected));
+        return states;
+    }
+
+    private android.graphics.drawable.StateListDrawable interactiveTranslucentBackground(int color, int radius) {
+        android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
+        int alpha = Color.alpha(color);
+        int pressed = Color.argb(Math.min(255, alpha + 32),
+                Math.round(Color.red(color) * 0.88f),
+                Math.round(Color.green(color) * 0.88f),
+                Math.round(Color.blue(color) * 0.88f));
+        states.addState(new int[]{android.R.attr.state_pressed}, buttonBackground(pressed, radius));
+        states.addState(new int[]{}, buttonBackground(color, radius));
+        return states;
+    }
+
     private GradientDrawable cardBackground(int color, int radius) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
         drawable.setCornerRadius(radius);
         drawable.setStroke(dp(1), borderColor());
         return drawable;
-    }
-
-    private GradientDrawable activeCourseBackground(int color, int radius) {
-        int start = mixColor(color, Color.WHITE, isDarkMode ? 0.06f : 0.10f);
-        int end = mixColor(color, Color.BLACK, isDarkMode ? 0.10f : 0.04f);
-        GradientDrawable drawable = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{start, end}
-        );
-        drawable.setCornerRadius(radius);
-        drawable.setStroke(dp(1), Color.argb(90, 255, 255, 255));
-        return drawable;
-    }
-
-    private GradientDrawable courseCardBackground(int color, int radius) {
-        int surface = mixColor(cardColor(), color, isDarkMode ? 0.08f : 0.04f);
-        int stroke = mixColor(borderColor(), color, isDarkMode ? 0.20f : 0.12f);
-        return roundedSurface(surface, radius, stroke);
     }
 
     private GradientDrawable completedCourseFilterBackground(int radius) {
@@ -4041,10 +4194,6 @@ public class MainActivity extends AppCompatActivity {
         return isDarkMode ? Color.rgb(22, 26, 32) : Color.rgb(236, 242, 249);
     }
 
-    private int pressedSurfaceColor(int color) {
-        return mixColor(color, isDarkMode ? Color.WHITE : Color.BLACK, isDarkMode ? 0.08f : 0.05f);
-    }
-
     private int pressedButtonColor(int color) {
         return mixColor(color, Color.BLACK, isDarkMode ? 0.12f : 0.08f);
     }
@@ -4062,11 +4211,53 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int accentColor() {
-        return isDarkMode ? Color.rgb(105, 178, 255) : Color.rgb(30, 104, 210);
+        return ACCENT_PRESETS[accentPresetIndex()][isDarkMode ? 1 : 0];
     }
 
     private int todayColor() {
-        return isDarkMode ? Color.rgb(73, 87, 207) : Color.rgb(76, 99, 229);
+        float[] hsv = new float[3];
+        Color.colorToHSV(accentColor(), hsv);
+        hsv[0] = (hsv[0] + 42f) % 360f;
+        hsv[1] = Math.min(1f, hsv[1] + 0.05f);
+        hsv[2] = isDarkMode ? Math.min(1f, hsv[2] + 0.22f) : Math.max(0.14f, hsv[2] - 0.10f);
+        return Color.HSVToColor(hsv);
+    }
+
+    private int accentPresetIndex() {
+        int saved = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(ACCENT_KEY, DEFAULT_ACCENT_PRESET);
+        if (saved < 0 || saved >= ACCENT_PRESETS.length) {
+            return DEFAULT_ACCENT_PRESET;
+        }
+        return saved;
+    }
+
+    static int accentColorFor(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        int saved = prefs.getInt(ACCENT_KEY, DEFAULT_ACCENT_PRESET);
+        int index = (saved >= 0 && saved < ACCENT_PRESETS.length) ? saved : DEFAULT_ACCENT_PRESET;
+        boolean dark = isDarkModeFor(context, prefs);
+        return ACCENT_PRESETS[index][dark ? 1 : 0];
+    }
+
+    private static boolean isDarkModeFor(Context context, SharedPreferences prefs) {
+        int mode = prefs.getInt(THEME_KEY, 0);
+        if (mode == 2) {
+            return true;
+        }
+        if (mode == 1) {
+            return false;
+        }
+        return (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    private int accentContainerColor() {
+        int accent = accentColor();
+        return Color.argb(isDarkMode ? 46 : 26, Color.red(accent), Color.green(accent), Color.blue(accent));
+    }
+
+    private int tonalContainerColor() {
+        return mixColor(accentColor(), cardColor(), 0.90f);
     }
 
     private void loadCourses() {
@@ -4251,8 +4442,10 @@ public class MainActivity extends AppCompatActivity {
         return isCompactWidth() ? 12 : CONTENT_SIDE_MARGIN_DP;
     }
 
-    private Typeface dengXian(int style) {
-        return Typeface.create("DengXian", style);
+    private Typeface appTypeface(int style) {
+        // Use the platform's native typeface stack (Roboto + Noto Sans CJK)
+        // so the UI matches native Android typography instead of a bundled font.
+        return Typeface.create("sans-serif", style);
     }
 
     private interface PositionCallback {
@@ -4582,10 +4775,10 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private static class BoundedFrameLayout extends FrameLayout {
+    private static class BoundedMaterialCardView extends MaterialCardView {
         private int maxHeightPx;
 
-        BoundedFrameLayout(android.content.Context context) {
+        BoundedMaterialCardView(android.content.Context context) {
             super(context);
         }
 
