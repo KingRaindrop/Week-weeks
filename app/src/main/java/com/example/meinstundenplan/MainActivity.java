@@ -95,14 +95,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String CALENDAR_WEEKS_KEY = "calendar_total_weeks";
     private static final String CALENDAR_NAME_KEY = "calendar_name";
     private static final String DEFAULT_CALENDAR_URL = "https://jwc.jyu.edu.cn/info/1102/4690.htm";
-    private static final Pattern CALENDAR_DATE_PATTERN = Pattern.compile(
-            "(20\\d{2})\\s*[年./\\-]\\s*(\\d{1,2})\\s*[月./\\-]\\s*(\\d{1,2})\\s*日?"
-    );
     private static final Pattern CALENDAR_YEAR_PATTERN = Pattern.compile(
             "(20\\d{2})\\s*[-—–至~～]\\s*(20\\d{2})"
     );
-    private static final String[] CALENDAR_START_KEYWORDS = {"报到", "开学", "第一周", "开始上课", "注册"};
-    private static final String[] CALENDAR_END_KEYWORDS = {"散学", "放假", "暑假", "学期结束", "学期末"};
     private static final int MAX_FIELD_LENGTH = 60;
     private static final int MAX_COURSES = 200;
     private static final int REQUEST_IMPORT_PDF = 40;
@@ -3257,8 +3252,8 @@ public class MainActivity extends AppCompatActivity {
         if (!normalized.contains("校历")) {
             throw new ImportException("未识别到校历页面内容");
         }
-        Calendar start = extractCalendarDateNear(normalized, CALENDAR_START_KEYWORDS);
-        Calendar end = extractCalendarDateNear(normalized, CALENDAR_END_KEYWORDS);
+        Calendar start = CalendarDateExtractor.extractStart(normalized);
+        Calendar end = CalendarDateExtractor.extractEnd(normalized);
         if (start == null || end == null || end.getTimeInMillis() < start.getTimeInMillis()) {
             throw new ImportException("未能从校历页面解析出开学/散学日期，请打开「校历设置」手动填写");
         }
@@ -3274,38 +3269,6 @@ public class MainActivity extends AppCompatActivity {
         calendar.endMillis = endMillis;
         calendar.totalWeeks = (int) weekSpan + 1;
         return calendar;
-    }
-
-    /**
-     * 在校历 HTML 中查找关键词附近的「YYYY年M月D日 / YYYY-MM-DD」日期。
-     * 找不到任何关键词或关键词附近没有合法日期时返回 null。
-     */
-    private Calendar extractCalendarDateNear(String text, String[] keywords) {
-        for (String keyword : keywords) {
-            int index = text.indexOf(keyword);
-            if (index < 0) {
-                continue;
-            }
-            int from = Math.max(0, index - 40);
-            int to = Math.min(text.length(), index + 40);
-            Matcher matcher = CALENDAR_DATE_PATTERN.matcher(text.substring(from, to));
-            if (matcher.find()) {
-                try {
-                    int year = Integer.parseInt(matcher.group(1));
-                    int month = Integer.parseInt(matcher.group(2));
-                    int day = Integer.parseInt(matcher.group(3));
-                    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-                        Calendar calendar = Calendar.getInstance();
-                        calendar.clear();
-                        calendar.set(year, month - 1, day);
-                        return calendar;
-                    }
-                } catch (NumberFormatException ignored) {
-                    // 继续尝试下一个关键词
-                }
-            }
-        }
-        return null;
     }
 
     private String inferCalendarName(String normalized, String sourceUrl) {
