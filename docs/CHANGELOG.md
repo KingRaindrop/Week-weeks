@@ -6,7 +6,7 @@
 
 ## 2026-08-12 · 批次 1（P0）：基线建立与签名安全加固
 
-**Git 提交**：`dd8f1fd chore: baseline with hardened signing layout`
+**Git 提交**：`fb6dcee chore: baseline with hardened signing layout`
 
 ### 发现的问题
 
@@ -26,7 +26,7 @@
    - 新增 `secrets/release-signing.properties.template`（唯一入库文件），说明填写方式。
    - `app/build.gradle` 签名解析改为三级回退：环境变量 `MEIN_STORE_FILE`/`MEIN_STORE_PASSWORD`/`MEIN_KEY_ALIAS`/`MEIN_KEY_PASSWORD` → `secrets/release-signing.properties` → `~/.gradle/mein-stundenplan-signing.properties`。CI 可用环境变量，本地不依赖仓库内文件。
 2. **建立版本控制基线**
-   - 删除空 `.git`，`git init -b main`，提交基线 `dd8f1fd`。
+   - 删除空 `.git`，`git init -b main`，提交基线 `fb6dcee`。
    - `artifacts/`、`build/`、`app/build/`、`secrets/*`（模板除外）全部排除在版本库外。
 3. **README 修正**
    - 安全设计一节如实说明 `INTERNET` 权限用途与约束（仅 HTTPS、校方域名白名单、禁止重定向、512KB 上限）。
@@ -49,7 +49,7 @@
 
 ## 2026-08-12 · 批次 2（短期）：Gradle Wrapper 与构建可移植性
 
-**Git 提交**：`d9bd828 build: add offline Gradle wrapper 9.2.0 and portable build config`
+**Git 提交**：`5485570 build: add offline Gradle wrapper 9.2.0 and portable build config`
 
 ### 发现的问题
 
@@ -94,7 +94,7 @@
 
 ## 2026-08-12 · 批次 3（短期）：抽取 SecureStorage 消除重复加密代码
 
-**Git 提交**：`a4e1c3a refactor: extract SecureStorage for shared Keystore AES/GCM encryption`
+**Git 提交**：`63a3c1e refactor: extract SecureStorage for shared Keystore AES/GCM encryption`
 
 ### 发现的问题
 
@@ -139,7 +139,7 @@
 
 ## 2026-08-12 · 批次 4（短期）：拆分 PDF 解析为纯 Java 并补充测试
 
-**Git 提交**：`3e0bbc4 refactor: extract PDF course parsing into pure-Java PdfCourseParser`
+**Git 提交**：`71209a6 refactor: extract PDF course parsing into pure-Java PdfCourseParser`
 
 ### 发现的问题
 
