@@ -312,7 +312,12 @@ final class PdfCourseParser {
         List<String> parts = new ArrayList<>();
         for (int i = metadataIndex - 1; i >= 0; i--) {
             PdfTextItem previous = items.get(i);
-            if (!sameCourseAxis(previous, metadata, rowAxis) || !looksLikeCourseNameLine(previous.text)) {
+            if (!sameCourseAxis(previous, metadata, rowAxis)) {
+                // 课程可能跨 PDF 分页：课程名留在上一页底部，节次信息出现在下一页顶部，
+                // 中间会夹杂其他列的文本，跳过它们继续沿同一列/行回溯。
+                continue;
+            }
+            if (!looksLikeCourseNameLine(previous.text)) {
                 break;
             }
             parts.add(0, previous.text);

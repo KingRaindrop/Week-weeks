@@ -2,16 +2,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$javaHome = if ($env:JAVA_HOME -and (Test-Path -LiteralPath $env:JAVA_HOME)) {
-    $env:JAVA_HOME
-} else {
-    "D:\Android Studio\jbr"
-}
-$androidHome = if ($env:ANDROID_HOME -and (Test-Path -LiteralPath $env:ANDROID_HOME)) {
-    $env:ANDROID_HOME
-} else {
-    "D:\Android\Sdk"
-}
+. (Join-Path $PSScriptRoot "local-env.ps1")
+$javaHome = Get-MeinJavaHome
+$androidHome = Get-MeinAndroidHome
 $javac = Join-Path $javaHome "bin\javac.exe"
 $java = Join-Path $javaHome "bin\java.exe"
 $androidJar = Join-Path $androidHome "platforms\android-36.1\android.jar"
@@ -30,19 +23,14 @@ New-Item -ItemType Directory -Force -Path $logicOut, $androidOut | Out-Null
     (Join-Path $root "app\src\main\java\com\example\meinstundenplan\TimetableRules.java") `
     (Join-Path $root "app\src\main\java\com\example\meinstundenplan\ImportException.java") `
     (Join-Path $root "app\src\main\java\com\example\meinstundenplan\PdfCourseParser.java") `
-    (Join-Path $root "app\src\main\java\com\example\meinstundenplan\CalendarDateExtractor.java") `
     (Join-Path $root "tools\TimetableRulesTest.java") `
-    (Join-Path $root "tools\PdfCourseParserTest.java") `
-    (Join-Path $root "tools\CalendarDateExtractorTest.java")
+    (Join-Path $root "tools\PdfCourseParserTest.java")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 & $java -cp $logicOut com.example.meinstundenplan.TimetableRulesTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 & $java -cp $logicOut com.example.meinstundenplan.PdfCourseParserTest
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-& $java -cp $logicOut com.example.meinstundenplan.CalendarDateExtractorTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $sources = Get-ChildItem -LiteralPath (Join-Path $root "app\src\main\java") -Recurse -Filter *.java |

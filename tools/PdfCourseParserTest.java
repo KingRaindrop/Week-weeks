@@ -19,6 +19,7 @@ public final class PdfCourseParserTest {
         testInvalidWeeksSkipped();
         testPeriodOutOfRangeSkipped();
         testMultiStreamParsed();
+        testCrossPageNameLookup();
         testStreamSizeLimitRejected();
         testCourseCountLimit();
         testLiteralEscapeInName();
@@ -106,6 +107,25 @@ public final class PdfCourseParserTest {
         PdfCourseParser.ParseResult result = PdfCourseParser.parseCourses(
                 pdfWithStreams(stream(s1), stream(s2)), MAX_PERIODS, MAX_STREAM, MAX_COURSES);
         check(result.courses.size() == 2, "two streams should yield two courses, got " + result.courses.size());
+    }
+
+    // 课程跨 PDF 分页：课程名留在第 1 页底部（如 x=415.62, y=22.5），
+    // 节次信息出现在第 2 页顶部（y=567），中间隔着其他列的文本（如节次标签"8"）。
+    // 回溯查找课程名时必须跳过其他列的文本，而不是在它们处中断。
+    private static void testCrossPageNameLookup() throws Exception {
+        String page1Tail = "BT 1 0 0 1 415.62 22.5 Tm (Comp Organization) Tj ET";
+        String page2Head = "BT 1 0 0 1 78.13 524.5 Tm (8) Tj "
+                + "1 0 0 1 415.62 567 Tm " + METADATA_ROW + " "
+                + "1 0 0 1 415.62 555 Tm (/\u573a\u5730:A101/\u6559\u5e08:\u5f20\u4e09 ) Tj ET";
+        PdfCourseParser.ParseResult result = PdfCourseParser.parseCourses(
+                pdfWithStreams(stream(page1Tail), stream(page2Head)), MAX_PERIODS, MAX_STREAM, MAX_COURSES);
+        check(result.courses.size() == 1,
+                "cross-page course should be parsed, got " + result.courses.size());
+        PdfCourseParser.ParsedCourse c = result.courses.get(0);
+        check(c.name.equals("Comp Organization"), "name mismatch: " + c.name);
+        check(c.day == 3, "course should map to Thursday, got " + c.day);
+        check(c.room.equals("A101"), "room mismatch: " + c.room);
+        check(c.teacher.equals("\u5f20\u4e09"), "teacher mismatch: " + c.teacher);
     }
 
     private static void testStreamSizeLimitRejected() {

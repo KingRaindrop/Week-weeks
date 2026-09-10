@@ -29,7 +29,7 @@
    - 删除空 `.git`，`git init -b main`，提交基线 `dd8f1fd`。
    - `artifacts/`、`build/`、`app/build/`、`secrets/*`（模板除外）全部排除在版本库外。
 3. **README 修正**
-   - 安全设计一节如实说明 `INTERNET` 权限用途与约束（仅 HTTPS、`jyu.edu.cn` 域名白名单、禁止重定向、512KB 上限）。
+   - 安全设计一节如实说明 `INTERNET` 权限用途与约束（仅 HTTPS、校方域名白名单、禁止重定向、512KB 上限）。
    - 新增"校历在线导入"功能说明与请求约束小节。
    - 新增"发布签名"小节说明凭据解析顺序。
 
@@ -77,7 +77,7 @@
 5. **README 构建章节重写**
    改为以 wrapper 为主入口，保留 D 盘环境变量说明。
 6. **发行版缓存对齐**
-   将 `gradle-9.2.0-bin` 发行版复制到 `D:\Android\Gradle\wrapper\dists`，使 `GRADLE_USER_HOME=D:\Android\Gradle` 时 wrapper 离线可用。
+   将 `gradle-9.2.0-bin` 发行版复制到 `<Gradle 用户目录>\wrapper\dists`，使 `GRADLE_USER_HOME=<Gradle 用户目录>` 时 wrapper 离线可用。
 
 ### 待解决的问题
 
@@ -316,7 +316,7 @@
 - 快速编译 + 逻辑测试：
   `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\verify-logic.ps1`
 - 构建（首次需联网，之后可离线）：
-  `$env:JAVA_HOME='D:\Android Studio\jbr'; $env:ANDROID_HOME='D:\Android\Sdk'; $env:ANDROID_SDK_ROOT='D:\Android\Sdk'; $env:GRADLE_USER_HOME='D:\Android\Gradle'; .\gradlew.bat --no-daemon assembleDebug`
+  `$env:JAVA_HOME='<JDK 目录>'; $env:ANDROID_HOME='<Android SDK 目录>'; $env:ANDROID_SDK_ROOT='<Android SDK 目录>'; $env:GRADLE_USER_HOME='<Gradle 用户目录>'; .\gradlew.bat --no-daemon assembleDebug`
 - 离线构建加 `--offline`。
 
 ### 注意事项
@@ -463,3 +463,79 @@
 ### 验证状态（已通过）
 
 - `verify-logic.ps1` 与 `assembleDebug` BUILD SUCCESSFUL，MUMU 实测背景色由深色 `(43,41,48)` 切回浅色 `(~238-248)`。
+
+---
+
+## 2026-08-13 · 移除"校历在线导入"功能（v1.2 / versionCode 3）
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 动机
+
+- 在线导入实为"联网验证页面标题 + 返回内置常量日期"的半假功能（见早期分析报告 #4），换学期即失效；
+- 移除后应用可彻底去掉 `INTERNET` 权限，回到完全离线，与 README 安全定位一致（早期分析报告 #3 的根因消除）。
+
+### 已完成的改动
+
+- `MainActivity.java`：删除校历对话框 URL 输入与"在线导入"按钮；删除 `importAcademicCalendarOnline`/`fetchAcademicCalendar`/`decodeCalendarText`/`parseAcademicCalendar`/`inferCalendarName`/`applyAcademicCalendar`/`AcademicCalendar`；删除 `DEFAULT_CALENDAR_URL`/`CALENDAR_YEAR_PATTERN`/`MAX_CALENDAR_BYTES` 与 `java.net.*`/`Charset` 导入。PDF 导入共用的 `readWithLimit`/`ImportException` 保留。
+- 删除 `CalendarDateExtractor.java` 与 `tools/CalendarDateExtractorTest.java`（移入回收站）。
+- `AndroidManifest.xml`：移除 `INTERNET` 权限（保留 `usesCleartextTraffic="false"` 作为纵深防御）。
+- `tools/security-audit.ps1`：断言反转——禁止 INTERNET 权限、禁止 Java 源码出现任何 http(s) URL 与网络类；`tools/verify-logic.ps1`：移除对应编译/测试条目。
+- README：删"校历在线导入"章节，新增"校历设置"说明与安全声明更新。
+- 版本：`versionCode 1 → 3`，`versionName 1.0 → 1.2`（git HEAD 基线为 1 / 1.0）。
+
+### 验证状态
+
+- 校历仅支持手动设置：设置 → 校历设置 → 填写开学日/散学日。
+
+---
+
+## 2026-08-31 · PDF 跨页课程名解析修复（v1.2.1 / versionCode 4）
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 改动
+
+- `PdfCourseParser`：课程跨 PDF 分页时（课程名留在上一页底部、节次元数据出现在下一页顶部，中间夹杂其他列文本），原逻辑遇到非课程名行即 `break` 导致课程名关联失败；改为跳过干扰行、沿同一列/行轴继续回溯（`continue`），仅轴向不匹配时才中断。
+- `tools/PdfCourseParserTest.java`：新增跨页关联回归用例。
+- 新增命令行复现工具 `tools/ReproRun.java`（未入库；读取样例 PDF 输出解析结果与 debugLog）。
+- 版本：`versionCode 3 → 4`，`versionName 1.2 → 1.2.1`。
+
+### 验证状态
+
+- `PdfCourseParserTest` 全部通过；`verify-logic.ps1` 通过。
+
+---
+
+## 2026-09-05 · 周切换浏览与状态保留（v1.2.2 / versionCode 5）
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 改动
+
+- 周切换浏览：主界面顶部新增周导航条（`‹ 第N周 · 日期范围 › [回到本周]`），支持浏览任意教学周课表；点击周标签打开周选择对话框；"回到本周"恢复跟随真实当前周。
+- 状态保留：新增 `onSaveInstanceState`，主题切换 `recreate()` / 进程重建后保留当前查看的星期与周次（`viewingWeek`），修复切换后视图跳变到其它星期。
+- 切换星期/周后自动滚动使选中星期进入视野（`scrollSelectedDayIntoView`）。
+- 校历引导：首次运行且未设置校历时主动弹出校历设置对话框（`maybePromptCalendarSetup` / `showCalendarImportDialog(firstRun)`），并兼容检测旧版校历数据（`containsLegacyCalendar`）。
+- 强调色选择面板重构（`renderAccentChoices`）；状态标签统一为 `updateStatusChip`（区分预览周）。
+- README：新增"周切换浏览"功能点与说明。
+- 版本：`versionCode 4 → 5`，`versionName 1.2.1 → 1.2.2`。
+
+### 验证状态
+
+- `security-audit.ps1`、`verify-logic.ps1`、`assembleDebug`、`assembleRelease` 全部通过（2026-09-07 全面检测复核）。
+
+---
+
+## 2026-09-07 · Lint 清理：adaptive icon monochrome 层 + legacy 图标圆角
+
+### 改动
+
+- 新增 `drawable/ic_launcher_monochrome.xml`：单色剪影（挂环 + 日历主体，内部三条线以 `fillType="evenOdd"` 挖空），供 Android 13+ 主题图标使用。
+- `mipmap-anydpi-v26/ic_launcher.xml` 与 `ic_launcher_round.xml` 补 `<monochrome>` 标签，消除 2 个 `MonochromeLauncherIcon` 警告。
+- `mipmap-mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi` 五个方形 `ic_launcher.png` 做圆角透明处理（半径 = 边长 25%，抗锯齿），消除 5 个 `IconLauncherShape` 警告；风格与圆形版图标一致。
+- CHANGELOG：修正 v1.2 条目版本行为 `1 → 3`（git HEAD 基线为 1 / 1.0），并补 v1.2.1 / v1.2.2 两条记录与本条目。
+
+### 验证状态
+
+- `lintDebug`：0 errors / 0 warnings（原 0 errors / 7 warnings）；`security-audit.ps1`、`verify-logic.ps1`、`assembleDebug`、`assembleRelease` 全部通过。

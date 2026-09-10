@@ -7,6 +7,8 @@ plugins {
 //      MEIN_STORE_FILE, MEIN_STORE_PASSWORD, MEIN_KEY_ALIAS, MEIN_KEY_PASSWORD
 //   2. secrets/release-signing.properties in the project (git-ignored; see the .template)
 //   3. ~/.gradle/mein-stundenplan-signing.properties (user home, outside the repo)
+// When nothing resolves, the release build stays unsigned so that a fresh clone can
+// still run assembleRelease (it produces app-release-unsigned.apk).
 def signingProps = new Properties()
 [
     rootProject.file("secrets/release-signing.properties"),
@@ -25,6 +27,15 @@ def signingValue = { String envName, String propName ->
     return signingProps.getProperty(propName)
 }
 
+def releaseStoreFile = signingValue("MEIN_STORE_FILE", "storeFile")
+def releaseStorePassword = signingValue("MEIN_STORE_PASSWORD", "storePassword")
+def releaseKeyAlias = signingValue("MEIN_KEY_ALIAS", "keyAlias")
+def releaseKeyPassword = signingValue("MEIN_KEY_PASSWORD", "keyPassword")
+def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+if (!hasReleaseSigning) {
+    logger.lifecycle("No release signing credentials resolved: assembleRelease will emit an unsigned APK.")
+}
+
 android {
     namespace "com.example.meinstundenplan"
     compileSdk {
@@ -38,8 +49,8 @@ android {
         applicationId "com.example.meinstundenplan"
         minSdk 23
         targetSdk 36
-        versionCode 1
-        versionName "1.0"
+        versionCode 5
+        versionName "1.2.2"
     }
 
     compileOptions {
@@ -53,15 +64,11 @@ android {
 
     signingConfigs {
         release {
-            def resolvedStoreFile = signingValue("MEIN_STORE_FILE", "storeFile")
-            def resolvedStorePassword = signingValue("MEIN_STORE_PASSWORD", "storePassword")
-            def resolvedKeyAlias = signingValue("MEIN_KEY_ALIAS", "keyAlias")
-            def resolvedKeyPassword = signingValue("MEIN_KEY_PASSWORD", "keyPassword")
-            if (resolvedStoreFile && resolvedStorePassword && resolvedKeyAlias && resolvedKeyPassword) {
-                storeFile rootProject.file(resolvedStoreFile)
-                storePassword resolvedStorePassword
-                keyAlias resolvedKeyAlias
-                keyPassword resolvedKeyPassword
+            if (hasReleaseSigning) {
+                storeFile rootProject.file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
             }
         }
     }
@@ -75,7 +82,9 @@ android {
             shrinkResources true
             debuggable false
             buildConfigField "boolean", "ENABLE_TEST_COURSE", "false"
-            signingConfig signingConfigs.release
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }

@@ -9,3 +9,5 @@ app/build/
 secrets/*
 !secrets/release-signing.properties.template
 artifacts/
+dist/
+samples/

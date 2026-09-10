@@ -18,7 +18,10 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputFilter;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.RelativeSizeSpan;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -30,6 +33,7 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -49,10 +53,6 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -94,16 +94,13 @@ public class MainActivity extends AppCompatActivity {
     private static final String CALENDAR_END_KEY = "calendar_end_millis";
     private static final String CALENDAR_WEEKS_KEY = "calendar_total_weeks";
     private static final String CALENDAR_NAME_KEY = "calendar_name";
-    private static final String DEFAULT_CALENDAR_URL = "https://jwc.jyu.edu.cn/info/1102/4690.htm";
-    private static final Pattern CALENDAR_YEAR_PATTERN = Pattern.compile(
-            "(20\\d{2})\\s*[-—–至~～]\\s*(20\\d{2})"
-    );
+    // 首次安装引导：从未保存过校历（且也没有旧版遗留的校历数据）时，强制要求设置开学日/散学日
+    private static final String CALENDAR_INITIALIZED_KEY = "calendar_initialized";
     private static final int MAX_FIELD_LENGTH = 60;
     private static final int MAX_COURSES = 200;
     private static final int REQUEST_IMPORT_PDF = 40;
     private static final int MAX_PDF_BYTES = 5 * 1024 * 1024;
     private static final int MAX_STREAM_BYTES = 2 * 1024 * 1024;
-    private static final int MAX_CALENDAR_BYTES = 512 * 1024;
     private static final long PROGRESS_REFRESH_MS = 5000L;
     private static final long COUNTDOWN_REFRESH_MS = 1000L;
     private static final int COUNTDOWN_SECONDS_THRESHOLD = 5 * 60;
@@ -179,6 +176,15 @@ public class MainActivity extends AppCompatActivity {
     private ImageButton themeToggle;
     private View settingsOverlay;
     private int selectedDay = 0;
+    private int viewingWeek = 0; // 0=跟随真实当前周；非 0=预览该周
+    private TextView weekRangeText;
+    private ImageButton weekPrevButton;
+    private ImageButton weekNextButton;
+    private TextView weekLiveBadge;
+    private LinearLayout weekNavRow;
+    private AlertDialog weekPickerDialog;
+    private HorizontalScrollView dayScroll;
+    private int lastAutoScrolledDay = -1;
     private boolean storageLocked = false;
     private boolean isDarkMode = false;
     private boolean activityResumed = false;
@@ -192,6 +198,8 @@ public class MainActivity extends AppCompatActivity {
     private int daySwipePointerId = MotionEvent.INVALID_POINTER_ID;
     private boolean daySwipeChildCancelled = false;
     private int themeMode = 1; // 1=浅色, 2=深色
+    private static final String STATE_SELECTED_DAY = "state_selected_day";
+    private static final String STATE_VIEWING_WEEK = "state_viewing_week";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -207,12 +215,34 @@ public class MainActivity extends AppCompatActivity {
         }
         removeExpiredCoursesIfNeeded(false);
         addTemporaryDynamicIslandCourseIfDebug();
+        if (savedInstanceState != null) {
+            // 主题切换 recreate() / 进程重建后：保留用户当前查看的星期与周次，
+            // 避免被 currentSchoolDay() 重置（周六打开色调却跳去周六的问题）
+            selectedDay = clamp(
+                    savedInstanceState.getInt(STATE_SELECTED_DAY, selectedDay),
+                    0,
+                    DAYS.length - 1
+            );
+            viewingWeek = clamp(
+                    savedInstanceState.getInt(STATE_VIEWING_WEEK, 0),
+                    0,
+                    Math.max(0, totalCalendarWeeks())
+            );
+        }
         buildLayout();
         render();
         maybeShowReminderPopupFromIntent(getIntent());
         ensureNotificationPermission();
         maybeSendDebugReminderTestNotification(getIntent());
         scheduleClassReminderNotifications();
+        maybePromptCalendarSetup();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putInt(STATE_SELECTED_DAY, selectedDay);
+        outState.putInt(STATE_VIEWING_WEEK, viewingWeek);
     }
 
     @Override
@@ -358,7 +388,7 @@ public class MainActivity extends AppCompatActivity {
         if (settingsOverlay != null && settingsOverlay.getParent() != null) {
             return false;
         }
-        return !isTouchInsideDayTabs(event);
+        return !isTouchInsideDayTabs(event) && !isTouchInsideWeekNav(event);
     }
 
     private boolean isTouchInsideDayTabs(MotionEvent event) {
@@ -373,6 +403,20 @@ public class MainActivity extends AppCompatActivity {
                 && x <= location[0] + dayTabFrame.getWidth()
                 && y >= location[1]
                 && y <= location[1] + dayTabFrame.getHeight();
+    }
+
+    private boolean isTouchInsideWeekNav(MotionEvent event) {
+        if (weekNavRow == null || weekNavRow.getWidth() <= 0 || weekNavRow.getHeight() <= 0) {
+            return false;
+        }
+        int[] location = new int[2];
+        weekNavRow.getLocationOnScreen(location);
+        float x = event.getRawX();
+        float y = event.getRawY();
+        return x >= location[0]
+                && x <= location[0] + weekNavRow.getWidth()
+                && y >= location[1]
+                && y <= location[1] + weekNavRow.getHeight();
     }
 
     private boolean handleDaySwipe(float distanceX, float distanceY) {
@@ -720,7 +764,7 @@ public class MainActivity extends AppCompatActivity {
         statusChip.setEllipsize(TextUtils.TruncateAt.END);
         statusChip.setIncludeFontPadding(false);
         statusChip.setGravity(Gravity.CENTER);
-        statusChip.setPadding(dp(10), dp(4), dp(10), dp(4));
+        statusChip.setPadding(dp(12), dp(5), dp(12), dp(5));
         LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -774,13 +818,83 @@ public class MainActivity extends AppCompatActivity {
         addButton.setOnClickListener(view -> showCourseDialog(null));
         actions.addView(addButton, new LinearLayout.LayoutParams(dp(actionButtonSize), dp(actionButtonSize)));
 
+        // 周切换导航条：‹ 第N周·日期范围 › [回到本周]
+        weekNavRow = new LinearLayout(this);
+        weekNavRow.setOrientation(LinearLayout.HORIZONTAL);
+        weekNavRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams weekNavParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        weekNavParams.setMargins(dp(sideMargin), dp(compact ? 14 : 18), dp(sideMargin), dp(6));
+        root.addView(weekNavRow, weekNavParams);
+
+        weekPrevButton = new ImageButton(this);
+        weekPrevButton.setImageResource(R.drawable.ic_chevron_right);
+        weekPrevButton.setRotation(180f);
+        weekPrevButton.setImageTintList(ColorStateList.valueOf(accentColor()));
+        weekPrevButton.setScaleType(android.widget.ImageView.ScaleType.CENTER);
+        weekPrevButton.setContentDescription("上一周");
+        weekPrevButton.setBackground(interactiveSurfaceBackground(cardColor(), dp(12)));
+        weekPrevButton.setPadding(dp(9), dp(9), dp(9), dp(9));
+        weekPrevButton.setOnClickListener(view -> stepViewingWeek(-1));
+        LinearLayout.LayoutParams weekPrevParams = new LinearLayout.LayoutParams(dp(36), dp(36));
+        weekPrevParams.setMargins(0, 0, dp(4), 0);
+        weekNavRow.addView(weekPrevButton, weekPrevParams);
+
+        weekRangeText = new TextView(this);
+        weekRangeText.setTextSize(compact ? 13 : 14);
+        weekRangeText.setTypeface(appTypeface(Typeface.BOLD));
+        weekRangeText.setTextColor(primaryTextColor());
+        weekRangeText.setGravity(Gravity.CENTER);
+        weekRangeText.setSingleLine(true);
+        weekRangeText.setEllipsize(TextUtils.TruncateAt.END);
+        weekRangeText.setIncludeFontPadding(false);
+        weekRangeText.setPadding(dp(8), dp(9), dp(8), dp(9));
+        weekRangeText.setBackground(interactiveSurfaceBackground(segmentedTrackColor(), dp(14)));
+        weekRangeText.setContentDescription("选择周次");
+        weekRangeText.setOnClickListener(view -> showWeekPickerDialog());
+        weekNavRow.addView(weekRangeText, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ));
+
+        weekNextButton = new ImageButton(this);
+        weekNextButton.setImageResource(R.drawable.ic_chevron_right);
+        weekNextButton.setImageTintList(ColorStateList.valueOf(accentColor()));
+        weekNextButton.setScaleType(android.widget.ImageView.ScaleType.CENTER);
+        weekNextButton.setContentDescription("下一周");
+        weekNextButton.setBackground(interactiveSurfaceBackground(cardColor(), dp(12)));
+        weekNextButton.setPadding(dp(9), dp(9), dp(9), dp(9));
+        weekNextButton.setOnClickListener(view -> stepViewingWeek(1));
+        LinearLayout.LayoutParams weekNextParams = new LinearLayout.LayoutParams(dp(36), dp(36));
+        weekNextParams.setMargins(dp(4), 0, dp(4), 0);
+        weekNavRow.addView(weekNextButton, weekNextParams);
+
+        weekLiveBadge = new TextView(this);
+        weekLiveBadge.setText("本周");
+        weekLiveBadge.setTextSize(13);
+        weekLiveBadge.setTypeface(appTypeface(Typeface.BOLD));
+        weekLiveBadge.setTextColor(accentColor());
+        weekLiveBadge.setGravity(Gravity.CENTER);
+        weekLiveBadge.setIncludeFontPadding(false);
+        weekLiveBadge.setContentDescription("返回本周");
+        weekLiveBadge.setPadding(dp(11), dp(9), dp(11), dp(9));
+        weekLiveBadge.setBackground(interactiveTranslucentBackground(
+                withAlpha(accentColor(), isDarkMode ? 64 : 34), dp(14)));
+        weekLiveBadge.setOnClickListener(view -> returnToCurrentWeek());
+        weekLiveBadge.setVisibility(View.GONE);
+        weekNavRow.addView(weekLiveBadge, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
         HorizontalScrollView dayScroll = new HorizontalScrollView(this);
+        this.dayScroll = dayScroll;
         dayScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout.LayoutParams dayScrollParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        dayScrollParams.setMargins(dp(sideMargin), dp(compact ? 18 : 24), dp(sideMargin), dp(16));
+        dayScrollParams.setMargins(dp(sideMargin), dp(compact ? 8 : 10), dp(sideMargin), dp(16));
         root.addView(dayScroll, dayScrollParams);
 
         dayTabFrame = new FrameLayout(this);
@@ -815,16 +929,21 @@ public class MainActivity extends AppCompatActivity {
     private void render() {
         renderDayTabs();
         renderCourseList();
+        renderWeekNav();
         int count = 0;
-        int currentWeek = currentTeachingWeek();
+        int filterWeek = viewingWeek != 0 ? viewingWeek : currentTeachingWeek();
         int today = currentSchoolDay();
         for (Course course : courses) {
-            if (course.day == selectedDay && courseOccursInTeachingWeek(course, currentWeek)) {
+            if (viewingWeek != 0 && course.temporary) {
+                continue;
+            }
+            if (course.day == selectedDay && courseOccursInTeachingWeek(course, filterWeek)) {
                 count++;
             }
         }
-        Course currentCourse = currentCourseInProgress();
-        SummaryCourse nextCourse = currentCourse == null ? nextUpcomingCourseFromToday() : null;
+        Course currentCourse = viewingWeek == 0 ? currentCourseInProgress() : null;
+        SummaryCourse nextCourse = currentCourse == null && viewingWeek == 0
+                ? nextUpcomingCourseFromToday() : null;
         String statusText;
         if (currentCourse != null) {
             statusText = "正在上 " + currentCourse.periodLabel() + " " + currentCourse.name;
@@ -841,9 +960,12 @@ public class MainActivity extends AppCompatActivity {
         } else {
             statusText = "\u6682\u65e0\u540e\u7eed\u8bfe\u7a0b";
         }
+        int realWeek = currentTeachingWeek();
         String weekText;
-        if (currentWeek >= 1 && currentWeek <= calendarTotalWeeks()) {
-            weekText = "第" + currentWeek + "周 · ";
+        if (viewingWeek != 0) {
+            weekText = "第" + viewingWeek + "周 · ";
+        } else if (realWeek >= 1 && realWeek <= calendarTotalWeeks()) {
+            weekText = "第" + realWeek + "周 · ";
         } else if (startOfTodayMillis() < calendarStartMillis()) {
             weekText = "未开学 · ";
         } else {
@@ -856,12 +978,23 @@ public class MainActivity extends AppCompatActivity {
                 DAYS[selectedDay],
                 count
         ));
-        updateStatusChip(currentCourse != null || nextCourse != null ? statusText : null);
+        if (viewingWeek != 0) {
+            updateStatusChip("预览模式 · 点按回到本周", true);
+        } else {
+            updateStatusChip(currentCourse != null || nextCourse != null ? statusText : null, false);
+        }
         renderedTemporalSignature = temporalSignature();
     }
 
-    private void updateStatusChip(String statusText) {
+    private void updateStatusChip(String statusText, boolean previewMode) {
         if (statusChip == null) {
+            return;
+        }
+        if (previewMode) {
+            statusChip.setText(statusText);
+            statusChip.setBackground(buttonBackground(tonalContainerColor(), dp(100)));
+            statusChip.setTextColor(accentColor());
+            statusChip.setOnClickListener(view -> returnToCurrentWeek());
             return;
         }
         boolean hasStatus = statusText != null && !statusText.isEmpty();
@@ -875,8 +1008,168 @@ public class MainActivity extends AppCompatActivity {
             chipBg = withAlpha(secondaryTextColor(), isDarkMode ? 44 : 22);
             chipFg = secondaryTextColor();
         }
-        statusChip.setBackground(buttonBackground(chipBg, dp(10)));
+        statusChip.setBackground(buttonBackground(chipBg, dp(100)));
         statusChip.setTextColor(chipFg);
+        statusChip.setOnClickListener(null);
+    }
+
+    private int totalCalendarWeeks() {
+        return Math.max(1, calendarTotalWeeks());
+    }
+
+    private int displayedViewingWeek() {
+        if (viewingWeek != 0) {
+            return clamp(viewingWeek, 1, totalCalendarWeeks());
+        }
+        int real = currentTeachingWeek();
+        if (real < 1) {
+            return 1;
+        }
+        return Math.min(real, totalCalendarWeeks());
+    }
+
+    private void stepViewingWeek(int delta) {
+        setViewingWeek(displayedViewingWeek() + delta);
+    }
+
+    private void setViewingWeek(int week) {
+        int total = totalCalendarWeeks();
+        if (week < 1 || week > total) {
+            return;
+        }
+        int from = displayedViewingWeek();
+        int real = currentTeachingWeek();
+        viewingWeek = (real >= 1 && real <= total && real == week) ? 0 : week;
+        if (week == from) {
+            render();
+            return;
+        }
+        render();
+        animateDaySwitch(Integer.compare(week, from));
+    }
+
+    private void returnToCurrentWeek() {
+        if (viewingWeek == 0) {
+            return;
+        }
+        int from = displayedViewingWeek();
+        viewingWeek = 0;
+        render();
+        animateDaySwitch(Integer.compare(displayedViewingWeek(), from));
+    }
+
+    private String weekRangeLabel(int week) {
+        long start = calendarStartMillis() + (long) (week - 1) * MILLIS_PER_WEEK;
+        long end = start + 6L * MILLIS_PER_DAY;
+        SimpleDateFormat format = new SimpleDateFormat("M.d", Locale.CHINA);
+        return "第" + week + "周 · " + format.format(new java.util.Date(start))
+                + "–" + format.format(new java.util.Date(end));
+    }
+
+    private void renderWeekNav() {
+        if (weekRangeText == null) {
+            return;
+        }
+        boolean previewing = viewingWeek != 0;
+        int week = displayedViewingWeek();
+        int total = totalCalendarWeeks();
+        weekRangeText.setText(weekRangeLabel(week));
+        weekRangeText.setTextColor(previewing ? accentColor() : primaryTextColor());
+        weekRangeText.setBackground(interactiveSurfaceBackground(
+                previewing ? tonalContainerColor() : segmentedTrackColor(), dp(14)));
+        boolean canPrev = week > 1;
+        boolean canNext = week < total;
+        weekPrevButton.setEnabled(canPrev);
+        weekPrevButton.setAlpha(canPrev ? 1f : 0.35f);
+        weekNextButton.setEnabled(canNext);
+        weekNextButton.setAlpha(canNext ? 1f : 0.35f);
+        weekLiveBadge.setVisibility(previewing ? View.VISIBLE : View.GONE);
+    }
+
+    private void showWeekPickerDialog() {
+        if (weekPickerDialog != null && weekPickerDialog.isShowing()) {
+            return;
+        }
+        int total = totalCalendarWeeks();
+        int selected = displayedViewingWeek();
+        int realWeek = currentTeachingWeek();
+        boolean realValid = realWeek >= 1 && realWeek <= total;
+
+        ScrollView pickerScroll = new ScrollView(this);
+        pickerScroll.setVerticalScrollBarEnabled(false);
+        LinearLayout picker = new LinearLayout(this);
+        picker.setOrientation(LinearLayout.VERTICAL);
+        picker.setPadding(dp(12), dp(4), dp(12), dp(8));
+        pickerScroll.addView(picker);
+
+        final AlertDialog[] dialogRef = new AlertDialog[1];
+        final int columns = 5;
+        for (int start = 1; start <= total; start += columns) {
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            int end = Math.min(start + columns, total + 1);
+            for (int week = start; week < end; week++) {
+                final int targetWeek = week;
+                boolean isRealWeek = realValid && week == realWeek;
+                String number = String.valueOf(week);
+                TextView cell = new TextView(this);
+                SpannableString cellText = new SpannableString(
+                        isRealWeek ? number + "\n今天" : number);
+                if (isRealWeek) {
+                    cellText.setSpan(new RelativeSizeSpan(0.62f), number.length(), cellText.length(),
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+                cell.setText(cellText);
+                cell.setTextSize(15);
+                cell.setTypeface(appTypeface(Typeface.BOLD));
+                cell.setIncludeFontPadding(false);
+                cell.setGravity(Gravity.CENTER);
+                cell.setContentDescription("第" + week + "周" + (isRealWeek ? "，本周" : ""));
+                boolean isSelectedCell = week == selected;
+                cell.setTextColor(isSelectedCell ? Color.WHITE : primaryTextColor());
+                cell.setBackground(isSelectedCell
+                        ? interactiveButtonBackground(accentColor(), dp(14))
+                        : interactiveTranslucentBackground(tonalContainerColor(), dp(14)));
+                cell.setOnClickListener(view -> {
+                    if (dialogRef[0] != null) {
+                        dialogRef[0].dismiss();
+                    }
+                    setViewingWeek(targetWeek);
+                });
+                LinearLayout.LayoutParams cellParams = new LinearLayout.LayoutParams(
+                        0, dp(46), 1f
+                );
+                cellParams.setMargins(dp(4), dp(4), dp(4), dp(4));
+                line.addView(cell, cellParams);
+            }
+            // 末行用占位 View 补齐列数，保持网格对齐
+            for (int pad = end; pad < start + columns; pad++) {
+                LinearLayout.LayoutParams spacerParams = new LinearLayout.LayoutParams(
+                        0, dp(46), 1f
+                );
+                spacerParams.setMargins(dp(4), dp(4), dp(4), dp(4));
+                line.addView(new View(this), spacerParams);
+            }
+            picker.addView(line, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            ));
+        }
+
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle("选择周次")
+                .setView(pickerScroll)
+                .setNegativeButton("关闭", null)
+                .create();
+        dialogRef[0] = dialog;
+        weekPickerDialog = dialog;
+        dialog.setOnDismissListener(d -> {
+            if (weekPickerDialog == dialog) {
+                weekPickerDialog = null;
+            }
+        });
+        dialog.show();
+        styleDialogWindow(dialog);
     }
 
     private void refreshTimedUi() {
@@ -890,7 +1183,9 @@ public class MainActivity extends AppCompatActivity {
 
     private String temporalSignature() {
         StringBuilder signature = new StringBuilder();
-        signature.append(currentTeachingWeek())
+        signature.append(displayedViewingWeek())
+                .append(':')
+                .append(viewingWeek)
                 .append(':')
                 .append(currentSchoolDay())
                 .append(':')
@@ -996,11 +1291,12 @@ public class MainActivity extends AppCompatActivity {
             dayText.setTextColor(textColor);
             tabContainer.addView(dayText);
 
-            // 今天添加小圆点指示器
+            // 今天添加小圆点指示器，颜色跟随文字状态
             View todayMarker = new View(this);
-            todayMarker.setBackground(buttonBackground(isToday ? accentColor() : Color.TRANSPARENT, dp(3)));
-            LinearLayout.LayoutParams markerParams = new LinearLayout.LayoutParams(dp(isToday ? 24 : 18), dp(4));
-            markerParams.setMargins(0, dp(5), 0, 0);
+            int markerColor = isSelected ? accentColor() : todayColor();
+            todayMarker.setBackground(buttonBackground(isToday ? markerColor : Color.TRANSPARENT, dp(3)));
+            LinearLayout.LayoutParams markerParams = new LinearLayout.LayoutParams(dp(5), dp(5));
+            markerParams.setMargins(0, dp(4), 0, 0);
             tabContainer.addView(todayMarker, markerParams);
 
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(compact ? 62 : 70), dp(compact ? 48 : 52));
@@ -1009,7 +1305,35 @@ public class MainActivity extends AppCompatActivity {
         }
         boolean shouldAnimateSlider = animateDaySlider;
         animateDaySlider = false;
-        dayTabs.post(() -> updateDaySelectionSlider(shouldAnimateSlider));
+        dayTabs.post(() -> {
+            updateDaySelectionSlider(shouldAnimateSlider);
+            if (selectedDay != lastAutoScrolledDay) {
+                scrollSelectedDayIntoView();
+                lastAutoScrolledDay = selectedDay;
+            }
+        });
+    }
+
+    private void scrollSelectedDayIntoView() {
+        if (dayScroll == null || dayTabs == null) {
+            return;
+        }
+        if (selectedDay < 0 || selectedDay >= dayTabs.getChildCount()) {
+            return;
+        }
+        View selectedTab = dayTabs.getChildAt(selectedDay);
+        if (selectedTab.getWidth() <= 0) {
+            return;
+        }
+        // 让选中日期居中显示：计算选中标签相对整个标签条的偏移
+        int tabLeft = selectedTab.getLeft();
+        int tabWidth = selectedTab.getWidth();
+        int scrollWidth = dayScroll.getWidth();
+        if (scrollWidth <= 0) {
+            return;
+        }
+        int targetScroll = tabLeft - (scrollWidth - tabWidth) / 2;
+        dayScroll.smoothScrollTo(Math.max(0, targetScroll), 0);
     }
 
     private void switchToDay(int day) {
@@ -1118,8 +1442,11 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        int currentWeek = currentTeachingWeek();
+        int currentWeek = viewingWeek != 0 ? viewingWeek : currentTeachingWeek();
         for (Course course : courses) {
+            if (viewingWeek != 0 && course.temporary) {
+                continue;
+            }
             if (course.day == selectedDay && courseOccursInTeachingWeek(course, currentWeek)) {
                 dayCourses.add(course);
             }
@@ -1136,7 +1463,7 @@ public class MainActivity extends AppCompatActivity {
             MaterialCardView emptyState = new MaterialCardView(this);
             emptyState.setCardBackgroundColor(cardColor());
             emptyState.setCardElevation(dp(1));
-            emptyState.setRadius(dp(16));
+            emptyState.setRadius(dp(24));
             emptyState.setStrokeColor(borderColor());
             emptyState.setStrokeWidth(dp(1));
             emptyState.setContentPadding(dp(24), dp(48), dp(24), dp(48));
@@ -1150,7 +1477,7 @@ public class MainActivity extends AppCompatActivity {
             ));
 
             FrameLayout emptyIconSurface = new FrameLayout(this);
-            emptyIconSurface.setBackground(buttonBackground(accentContainerColor(), dp(20)));
+            emptyIconSurface.setBackground(buttonBackground(accentContainerColor(), dp(36)));
             content.addView(emptyIconSurface, new LinearLayout.LayoutParams(dp(72), dp(72)));
 
             ImageView emptyIcon = new ImageView(this);
@@ -1248,10 +1575,12 @@ public class MainActivity extends AppCompatActivity {
         boolean completed = temporalState == TimetableRules.TemporalState.COMPLETED;
         boolean compact = isCompactWidth();
         int minHeightDp = active ? (compact ? 142 : 150) : (compact ? 92 : 100);
-        int maxHeightDp = active ? (compact ? 158 : 168) : (compact ? 122 : 132);
         BoundedMaterialCardView shell = new BoundedMaterialCardView(this);
         shell.setMinimumHeight(dp(minHeightDp));
-        shell.setMaxHeightPx(dp(maxHeightDp));
+        // 仅进行中卡片锁定最大高度（稳定倒计时/进度动画）；
+        // 普通与灰化卡片高度随内容自适应，两行课程名 + 时间胶囊 + 信息行不再被裁切，
+        // 系统大字号、竖屏窄屏同样安全。
+        shell.setMaxHeightPx(active ? dp(compact ? 158 : 168) : 0);
         shell.setRadius(dp(active ? 28 : 24));
         shell.setCardElevation(dp(active ? 5 : 1));
         shell.setCardBackgroundColor(active
@@ -1412,7 +1741,9 @@ public class MainActivity extends AppCompatActivity {
         edit.setImageResource(R.drawable.ic_more_horizontal);
         edit.setImageTintList(ColorStateList.valueOf(active ? Color.argb(225, 255, 255, 255) : secondaryTextColor()));
         edit.setScaleType(android.widget.ImageView.ScaleType.CENTER);
-        edit.setBackground(interactiveSurfaceBackground(active ? Color.argb(34, 255, 255, 255) : Color.TRANSPARENT, dp(18)));
+        edit.setBackground(interactiveSurfaceBackground(active
+                ? Color.argb(34, 255, 255, 255)
+                : withAlpha(secondaryTextColor(), isDarkMode ? 22 : 12), dp(18)));
         edit.setPadding(dp(12), dp(12), dp(12), dp(12));
         edit.setContentDescription("\u7f16\u8f91\u8bfe\u7a0b");
         edit.setOnClickListener(view -> showCourseDialog(course));
@@ -1578,6 +1909,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private TimetableRules.TemporalState courseTemporalState(Course course) {
+        if (viewingWeek != 0) {
+            // 预览模式：不做实时状态，只按日期比较（过去灰化 / 未来正常）
+            int previewWeek = clamp(viewingWeek, 1, calendarTotalWeeks());
+            if (!courseOccursInTeachingWeek(course, previewWeek)) {
+                return TimetableRules.TemporalState.UNAVAILABLE;
+            }
+            return courseDateMillisForWeek(course.day, previewWeek) < startOfTodayMillis()
+                    ? TimetableRules.TemporalState.COMPLETED
+                    : TimetableRules.TemporalState.UPCOMING;
+        }
         int currentWeek = currentTeachingWeek();
         boolean occursThisWeek = course.temporary
                 || (!course.invalidWeeks && courseOccursInTeachingWeek(course, currentWeek));
@@ -1959,7 +2300,7 @@ public class MainActivity extends AppCompatActivity {
         temporaryWeeksButton.setTextColor(accentColor());
         temporaryWeeksButton.setTextSize(14);
         temporaryWeeksButton.setTypeface(appTypeface(Typeface.BOLD));
-        temporaryWeeksButton.setBackground(elevatedCardBackground(cardColor(), dp(12)));
+        temporaryWeeksButton.setBackground(elevatedCardBackground(cardColor(), dp(14)));
         temporaryWeeksButton.setPadding(dp(12), 0, dp(12), 0);
         temporaryWeeksButton.setOnClickListener(view -> showTemporaryWeeksDialog(weeksInput));
         LinearLayout.LayoutParams temporaryWeeksParams = fieldParams();
@@ -2253,7 +2594,7 @@ public class MainActivity extends AppCompatActivity {
         }), settingsRowParams());
         panel.addView(settingsMenuRow(R.drawable.ic_calendar_outline, "\u6821\u5386\u8bbe\u7f6e", "\u8bbe\u7f6e\u5f00\u5b66\u65e5\u548c\u6563\u5b66\u65e5", accentColor(), view -> {
             dismissSettings[0].run();
-            showCalendarImportDialog();
+            showCalendarImportDialog(false);
         }), settingsRowParams());
 
         panel.addView(settingsSectionLabel("\u5916\u89c2"));
@@ -2288,19 +2629,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showAccentColorDialog() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER);
-        row.setPadding(dp(8), dp(12), dp(8), dp(12));
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(4), dp(10), dp(4), dp(6));
         int[] selected = new int[]{accentPresetIndex()};
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("\u754c\u9762\u8272\u8c03")
-                .setView(row)
+                .setView(panel)
                 .setNegativeButton("\u53d6\u6d88", null)
                 .setPositiveButton("\u786e\u5b9a", null)
                 .create();
-        renderAccentChoices(row, selected, dialog);
+        renderAccentChoices(panel, selected, dialog);
         dialog.setOnShowListener(d -> {
             Button confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
             if (confirm != null) {
@@ -2320,12 +2660,41 @@ public class MainActivity extends AppCompatActivity {
         styleDialogWindow(dialog);
     }
 
-    private void renderAccentChoices(LinearLayout row, int[] selected, AlertDialog dialog) {
-        row.removeAllViews();
+    private void renderAccentChoices(LinearLayout panel, int[] selected, AlertDialog dialog) {
+        panel.removeAllViews();
+        final int columns = 4;
+        GridLayout grid = new GridLayout(this);
+        grid.setColumnCount(columns);
+        LinearLayout.LayoutParams gridParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        gridParams.gravity = Gravity.CENTER_HORIZONTAL;
+        panel.addView(grid, gridParams);
+
         for (int i = 0; i < ACCENT_PRESETS.length; i++) {
             final int index = i;
             int color = ACCENT_PRESETS[i][0];
             boolean isSelected = index == selected[0];
+
+            LinearLayout cell = new LinearLayout(this);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER_HORIZONTAL);
+            cell.setClickable(true);
+            cell.setFocusable(true);
+            android.graphics.drawable.StateListDrawable cellBg = new android.graphics.drawable.StateListDrawable();
+            cellBg.addState(new int[]{android.R.attr.state_pressed},
+                    buttonBackground(withAlpha(accentColor(), isDarkMode ? 44 : 26), dp(14)));
+            cellBg.addState(new int[]{}, buttonBackground(Color.TRANSPARENT, dp(14)));
+            cell.setBackground(cellBg);
+            cell.setContentDescription(ACCENT_PRESET_NAMES[index]
+                    + (isSelected ? "\uff0c\u5df2\u9009" : "")
+                    + "\uff0c\u70b9\u6309\u9009\u62e9");
+            cell.setOnClickListener(view -> {
+                selected[0] = index;
+                renderAccentChoices(panel, selected, dialog);
+            });
+
             TextView swatch = new TextView(this);
             swatch.setText(isSelected ? "\u2713" : "");
             swatch.setTextColor(Color.WHITE);
@@ -2333,14 +2702,28 @@ public class MainActivity extends AppCompatActivity {
             swatch.setTypeface(appTypeface(Typeface.BOLD));
             swatch.setGravity(Gravity.CENTER);
             swatch.setBackground(swatchStateListBackground(color, isSelected));
-            swatch.setContentDescription(ACCENT_PRESET_NAMES[index] + (isSelected ? "\uff0c\u5df2\u9009" : ""));
-            swatch.setOnClickListener(view -> {
-                selected[0] = index;
-                renderAccentChoices(row, selected, dialog);
-            });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(44), dp(44));
-            params.setMargins(0, 0, dp(8), 0);
-            row.addView(swatch, params);
+            swatch.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            cell.addView(swatch, new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+            TextView name = new TextView(this);
+            name.setText(ACCENT_PRESET_NAMES[index]);
+            name.setTextSize(11);
+            name.setTextColor(isSelected ? accentColor() : secondaryTextColor());
+            name.setTypeface(appTypeface(isSelected ? Typeface.BOLD : Typeface.NORMAL));
+            name.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            nameParams.topMargin = dp(5);
+            cell.addView(name, nameParams);
+
+            GridLayout.LayoutParams cellParams = new GridLayout.LayoutParams(
+                    GridLayout.spec(index / columns),
+                    GridLayout.spec(index % columns, GridLayout.CENTER)
+            );
+            cellParams.setMargins(dp(6), dp(8), dp(6), dp(8));
+            grid.addView(cell, cellParams);
         }
     }
 
@@ -2349,9 +2732,10 @@ public class MainActivity extends AppCompatActivity {
         label.setText(text);
         label.setTextSize(12);
         label.setTypeface(appTypeface(Typeface.BOLD));
+        label.setLetterSpacing(0.08f);
         label.setTextColor(secondaryTextColor());
         label.setGravity(Gravity.CENTER_VERTICAL);
-        label.setPadding(dp(4), dp(7), dp(4), dp(4));
+        label.setPadding(dp(6), dp(12), dp(6), dp(5));
         return label;
     }
 
@@ -2359,24 +2743,24 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(dp(60));
-        row.setPadding(dp(12), dp(9), dp(10), dp(9));
-        row.setBackground(interactiveGlassSurfaceBackground(glassRowColor(), dp(16)));
+        row.setMinimumHeight(dp(64));
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        row.setBackground(interactiveGlassSurfaceBackground(glassRowColor(), dp(18)));
         row.setClickable(true);
         row.setFocusable(true);
         row.setContentDescription(titleText + "\uff0c" + subtitleText);
         row.setOnClickListener(listener);
 
         FrameLayout iconSurface = new FrameLayout(this);
-        iconSurface.setBackground(buttonBackground(glassIconTintColor(tintColor), dp(12)));
+        iconSurface.setBackground(buttonBackground(glassIconTintColor(tintColor), dp(14)));
         ImageView icon = new ImageView(this);
         icon.setImageResource(iconResId);
         icon.setImageTintList(ColorStateList.valueOf(tintColor));
         icon.setScaleType(ImageView.ScaleType.CENTER);
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         iconSurface.addView(icon, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
-        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(38), dp(38));
-        iconParams.setMargins(0, 0, dp(10), 0);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(40), dp(40));
+        iconParams.setMargins(0, 0, dp(12), 0);
         row.addView(iconSurface, iconParams);
 
         LinearLayout texts = new LinearLayout(this);
@@ -2394,7 +2778,7 @@ public class MainActivity extends AppCompatActivity {
         TextView subtitle = new TextView(this);
         subtitle.setText(subtitleText);
         subtitle.setTextColor(secondaryTextColor());
-        subtitle.setTextSize(11);
+        subtitle.setTextSize(12);
         subtitle.setTypeface(appTypeface(Typeface.NORMAL));
         subtitle.setSingleLine(true);
         subtitle.setEllipsize(TextUtils.TruncateAt.END);
@@ -2421,20 +2805,20 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(dp(60));
-        row.setPadding(dp(12), dp(9), dp(10), dp(9));
-        row.setBackground(interactiveGlassSurfaceBackground(glassRowColor(), dp(16)));
+        row.setMinimumHeight(dp(64));
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        row.setBackground(interactiveGlassSurfaceBackground(glassRowColor(), dp(18)));
 
         FrameLayout iconSurface = new FrameLayout(this);
-        iconSurface.setBackground(buttonBackground(glassIconTintColor(tintColor), dp(12)));
+        iconSurface.setBackground(buttonBackground(glassIconTintColor(tintColor), dp(14)));
         ImageView icon = new ImageView(this);
         icon.setImageResource(iconResId);
         icon.setImageTintList(ColorStateList.valueOf(tintColor));
         icon.setScaleType(ImageView.ScaleType.CENTER);
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         iconSurface.addView(icon, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
-        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(38), dp(38));
-        iconParams.setMargins(0, 0, dp(10), 0);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(40), dp(40));
+        iconParams.setMargins(0, 0, dp(12), 0);
         row.addView(iconSurface, iconParams);
 
         LinearLayout texts = new LinearLayout(this);
@@ -2451,7 +2835,7 @@ public class MainActivity extends AppCompatActivity {
         TextView subtitle = new TextView(this);
         subtitle.setText(subtitleText);
         subtitle.setTextColor(secondaryTextColor());
-        subtitle.setTextSize(11);
+        subtitle.setTextSize(12);
         subtitle.setTypeface(appTypeface(Typeface.NORMAL));
         subtitle.setSingleLine(true);
         subtitle.setEllipsize(TextUtils.TruncateAt.END);
@@ -2467,10 +2851,18 @@ public class MainActivity extends AppCompatActivity {
         toggle.setChecked(checked);
         toggle.setContentDescription(titleText);
         toggle.setOnCheckedChangeListener(listener);
+        toggle.setClickable(false);
+        toggle.setFocusable(false);
         row.addView(toggle, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         ));
+
+        // 整行可点击切换，而不只是右侧的小开关
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setContentDescription(titleText + "，" + (checked ? "已开启" : "已关闭") + "，点按切换");
+        row.setOnClickListener(view -> toggle.setChecked(!toggle.isChecked()));
 
         return row;
     }
@@ -2586,7 +2978,7 @@ public class MainActivity extends AppCompatActivity {
         Button calendar = settingsActionButton("校历设置", accentColor());
         calendar.setOnClickListener(view -> {
             dialog.dismiss();
-            showCalendarImportDialog();
+            showCalendarImportDialog(false);
         });
         panel.addView(calendar, fieldParams());
 
@@ -3110,12 +3502,14 @@ public class MainActivity extends AppCompatActivity {
                 .remove(CALENDAR_END_KEY)
                 .remove(CALENDAR_WEEKS_KEY)
                 .remove(CALENDAR_NAME_KEY)
+                .remove(CALENDAR_INITIALIZED_KEY)
                 .remove(REMINDER_CODES_KEY)
                 .commit();
         courses.clear();
         storageLocked = false;
         loadPeriodTimes();
         selectedDay = currentSchoolDay();
+        viewingWeek = 0;
         addTemporaryDynamicIslandCourseIfDebug();
         render();
         Toast.makeText(this, committed ? "当前配置已删除" : "配置删除可能未完全写入", Toast.LENGTH_LONG).show();
@@ -3133,29 +3527,43 @@ public class MainActivity extends AppCompatActivity {
         startActivityForResult(intent, REQUEST_IMPORT_PDF);
     }
 
-    private void showCalendarImportDialog() {
+    private void maybePromptCalendarSetup() {
+        boolean initialized = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getBoolean(CALENDAR_INITIALIZED_KEY, containsLegacyCalendar());
+        if (!initialized) {
+            showCalendarImportDialog(true);
+        }
+    }
+
+    private boolean containsLegacyCalendar() {
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        return prefs.contains(CALENDAR_START_KEY) && prefs.contains(CALENDAR_END_KEY);
+    }
+
+    private void showCalendarImportDialog(boolean firstRun) {
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(4), dp(8), dp(4), 0);
 
-        EditText startInput = input("YYYY-MM-DD", formatDate(calendarStartMillis()));
-        EditText endInput = input("YYYY-MM-DD", formatDate(calendarEndMillis()));
-        EditText urlInput = input("https://jwc.jyu.edu.cn/...", DEFAULT_CALENDAR_URL);
+        EditText startInput = input("YYYY-MM-DD", firstRun ? "" : formatDate(calendarStartMillis()));
+        EditText endInput = input("YYYY-MM-DD", firstRun ? "" : formatDate(calendarEndMillis()));
         form.addView(label("开学日（第1周起点）"));
         form.addView(startInput, fieldParams());
         form.addView(label("散学日"));
         form.addView(endInput, fieldParams());
-        form.addView(label("校历网页链接（仅限 jwc.jyu.edu.cn 的 https 链接）"));
-        form.addView(urlInput, fieldParams());
 
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle("校历设置")
-                .setMessage("总周数会按开学日和散学日自动计算。")
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
+                .setTitle(firstRun ? "欢迎使用：请先设置校历" : "校历设置")
+                .setMessage(firstRun
+                        ? "课程周次、倒计时和提醒都依赖校历，请填写本学期的开学日和散学日。"
+                        : "总周数会按开学日和散学日自动计算。")
                 .setView(form)
-                .setNegativeButton("取消", null)
-                .setNeutralButton("在线导入", null)
-                .setPositiveButton("保存", null)
-                .create();
+                .setPositiveButton("保存", null);
+        if (!firstRun) {
+            builder.setNegativeButton("取消", null);
+        }
+        AlertDialog dialog = builder.create();
+        dialog.setCancelable(!firstRun);
         dialog.setOnShowListener(d -> {
             Button confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
             confirm.setOnClickListener(view -> {
@@ -3172,115 +3580,9 @@ public class MainActivity extends AppCompatActivity {
                 saveAcademicCalendar("手动设置校历", start, end);
                 dialog.dismiss();
             });
-            Button online = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-            online.setOnClickListener(view -> {
-                String url = urlInput.getText().toString().trim();
-                if (url.isEmpty()) {
-                    Toast.makeText(this, "请先填写校历网页链接", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                dialog.dismiss();
-                importAcademicCalendarOnline(url);
-            });
         });
         dialog.show();
         styleDialogWindow(dialog);
-    }
-
-    private void importAcademicCalendarOnline(String urlText) {
-        if (urlText == null || urlText.trim().isEmpty()) {
-            Toast.makeText(this, "校历链接不能为空", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        Toast.makeText(this, "正在在线导入校历...", Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
-            try {
-                AcademicCalendar calendar = fetchAcademicCalendar(urlText.trim());
-                runOnUiThread(() -> applyAcademicCalendar(calendar));
-            } catch (Exception error) {
-                runOnUiThread(() -> Toast.makeText(this, "校历导入失败: " + error.getMessage(), Toast.LENGTH_LONG).show());
-            }
-        }).start();
-    }
-
-    private AcademicCalendar fetchAcademicCalendar(String urlText) throws Exception {
-        URL url = new URL(urlText);
-        if (!"https".equalsIgnoreCase(url.getProtocol())) {
-            throw new ImportException("仅支持 HTTPS 校历链接");
-        }
-        String host = url.getHost() == null ? "" : url.getHost().toLowerCase(Locale.ROOT);
-        if (!host.equals("jwc.jyu.edu.cn") && !host.endsWith(".jyu.edu.cn")) {
-            throw new ImportException("仅支持嘉应学院官网校历链接");
-        }
-
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setConnectTimeout(8000);
-        connection.setReadTimeout(8000);
-        connection.setInstanceFollowRedirects(false);
-        connection.setRequestMethod("GET");
-        connection.setRequestProperty("User-Agent", "MeinStundenplan/1.0");
-        try {
-            int code = connection.getResponseCode();
-            if (code < 200 || code >= 300) {
-                throw new ImportException("服务器返回 " + code);
-            }
-            byte[] bytes = readWithLimit(connection.getInputStream(), MAX_CALENDAR_BYTES, "校历网页过大，已拒绝导入");
-            String html = decodeCalendarText(bytes, connection.getContentType());
-            return parseAcademicCalendar(html, urlText);
-        } finally {
-            connection.disconnect();
-        }
-    }
-
-    private String decodeCalendarText(byte[] bytes, String contentType) {
-        Charset charset = StandardCharsets.UTF_8;
-        if (contentType != null) {
-            Matcher matcher = Pattern.compile("charset=([A-Za-z0-9_\\-]+)", Pattern.CASE_INSENSITIVE).matcher(contentType);
-            if (matcher.find()) {
-                try {
-                    charset = Charset.forName(matcher.group(1));
-                } catch (Exception ignored) {
-                    charset = StandardCharsets.UTF_8;
-                }
-            }
-        }
-        return new String(bytes, charset);
-    }
-
-    private AcademicCalendar parseAcademicCalendar(String html, String sourceUrl) throws ImportException {
-        String normalized = html == null ? "" : html.replaceAll("\\s+", "");
-        if (!normalized.contains("校历")) {
-            throw new ImportException("未识别到校历页面内容");
-        }
-        Calendar start = CalendarDateExtractor.extractStart(normalized);
-        Calendar end = CalendarDateExtractor.extractEnd(normalized);
-        if (start == null || end == null || end.getTimeInMillis() < start.getTimeInMillis()) {
-            throw new ImportException("未能从校历页面解析出开学/散学日期，请打开「校历设置」手动填写");
-        }
-        long startMillis = start.getTimeInMillis();
-        long endMillis = end.getTimeInMillis();
-        long weekSpan = (endMillis - startMillis) / MILLIS_PER_WEEK;
-        if (weekSpan < 8 || weekSpan > 40) {
-            throw new ImportException("解析出的校历跨度异常，请打开「校历设置」手动填写");
-        }
-        AcademicCalendar calendar = new AcademicCalendar();
-        calendar.name = inferCalendarName(normalized, sourceUrl);
-        calendar.startMillis = startMillis;
-        calendar.endMillis = endMillis;
-        calendar.totalWeeks = (int) weekSpan + 1;
-        return calendar;
-    }
-
-    private String inferCalendarName(String normalized, String sourceUrl) {
-        Matcher yearMatcher = CALENDAR_YEAR_PATTERN.matcher(normalized);
-        if (yearMatcher.find()) {
-            return "嘉应学院 " + yearMatcher.group(1) + "-" + yearMatcher.group(2) + " 学年校历";
-        }
-        return "嘉应学院校历（在线导入）";
-    }
-
-    private void applyAcademicCalendar(AcademicCalendar calendar) {
-        saveAcademicCalendar(calendar.name, calendar.startMillis, calendar.endMillis);
     }
 
     @SuppressLint("ApplySharedPref") // 依赖 commit 返回值判断校历保存成败，不能改 apply
@@ -3292,6 +3594,7 @@ public class MainActivity extends AppCompatActivity {
                 .putLong(CALENDAR_END_KEY, endMillis)
                 .putInt(CALENDAR_WEEKS_KEY, totalWeeks)
                 .putString(CALENDAR_NAME_KEY, name)
+                .putBoolean(CALENDAR_INITIALIZED_KEY, true)
                 .commit();
         if (!committed) {
             Toast.makeText(this, "校历保存失败，请检查设备存储状态", Toast.LENGTH_LONG).show();
@@ -3300,6 +3603,7 @@ public class MainActivity extends AppCompatActivity {
         int before = courses.size();
         removeExpiredCoursesIfNeeded(false);
         int removed = Math.max(0, before - courses.size());
+        viewingWeek = 0;
         render();
         scheduleClassReminderNotifications();
         Toast.makeText(this, "校历已保存：共 " + totalWeeks + " 周，当前第 " + currentTeachingWeek() + " 周，已删除 " + removed + " 门过期课程", Toast.LENGTH_LONG).show();
@@ -3420,6 +3724,7 @@ public class MainActivity extends AppCompatActivity {
                 int removedExpired = 0;
                 if (imported > 0) {
                     selectedDay = parsedCourses.get(0).day;
+                    viewingWeek = 0;
                     saveCourses();
                     int beforeClean = courses.size();
                     removeExpiredCoursesIfNeeded(false);
@@ -3688,7 +3993,9 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
         int currentWeek = currentTeachingWeek();
-        if (currentWeek <= 0) {
+        if (currentWeek <= 0 || currentWeek > calendarTotalWeeks()) {
+            // 今天不在校历范围内：校历未生效或已过期（多半是还没换新学期校历）。
+            // 此时按教学周判断"过期"会把新学期课程全部误删，必须跳过自动清理。
             return false;
         }
         int removed = 0;
@@ -3949,11 +4256,15 @@ public class MainActivity extends AppCompatActivity {
 
     private String selectedDayDateLabel() {
         Calendar calendar = Calendar.getInstance();
-        int currentWeek = currentTeachingWeek();
-        if (currentWeek >= 1 && currentWeek <= calendarTotalWeeks()) {
-            calendar.setTimeInMillis(courseDateMillisForWeek(selectedDay, currentWeek));
+        if (viewingWeek != 0) {
+            calendar.setTimeInMillis(courseDateMillisForWeek(selectedDay, clamp(viewingWeek, 1, calendarTotalWeeks())));
         } else {
-            calendar.add(Calendar.DAY_OF_YEAR, selectedDay - currentSchoolDay());
+            int currentWeek = currentTeachingWeek();
+            if (currentWeek >= 1 && currentWeek <= calendarTotalWeeks()) {
+                calendar.setTimeInMillis(courseDateMillisForWeek(selectedDay, currentWeek));
+            } else {
+                calendar.add(Calendar.DAY_OF_YEAR, selectedDay - currentSchoolDay());
+            }
         }
         return new SimpleDateFormat("MMMM d", Locale.ENGLISH).format(calendar.getTime());
     }
@@ -3978,7 +4289,7 @@ public class MainActivity extends AppCompatActivity {
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinner.setAdapter(adapter);
         spinner.setMinimumHeight(dp(52));
-        spinner.setPopupBackgroundDrawable(elevatedCardBackground(cardColor(), dp(12)));
+        spinner.setPopupBackgroundDrawable(elevatedCardBackground(cardColor(), dp(14)));
         return spinner;
     }
 
@@ -3997,7 +4308,7 @@ public class MainActivity extends AppCompatActivity {
         text.setPadding(dp(14), 0, dp(dropdown ? 14 : 42), 0);
         text.setBackground(dropdown
                 ? buttonBackground(cardColor(), 0)
-                : elevatedCardBackground(cardColor(), dp(12)));
+                : elevatedCardBackground(cardColor(), dp(14)));
     }
 
     private TextView label(String text) {
@@ -4005,8 +4316,9 @@ public class MainActivity extends AppCompatActivity {
         label.setText(text);
         label.setTextSize(13);
         label.setTypeface(appTypeface(Typeface.BOLD));
+        label.setLetterSpacing(0.05f);
         label.setTextColor(secondaryTextColor());
-        label.setPadding(0, dp(8), 0, dp(4));
+        label.setPadding(0, dp(10), 0, dp(5));
         return label;
     }
 
@@ -4018,8 +4330,8 @@ public class MainActivity extends AppCompatActivity {
         editText.setTextSize(16);
         editText.setTextColor(primaryTextColor());
         editText.setHintTextColor(secondaryTextColor());
-        editText.setPadding(dp(14), dp(10), dp(14), dp(10));
-        editText.setBackground(elevatedCardBackground(cardColor(), dp(12)));
+        editText.setPadding(dp(14), dp(12), dp(14), dp(12));
+        editText.setBackground(elevatedCardBackground(cardColor(), dp(14)));
         editText.setFilters(new InputFilter[]{new InputFilter.LengthFilter(MAX_FIELD_LENGTH)});
         return editText;
     }
@@ -4430,13 +4742,6 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onNothingSelected(AdapterView<?> parent) {
         }
-    }
-
-    private static class AcademicCalendar {
-        String name;
-        long startMillis;
-        long endMillis;
-        int totalWeeks;
     }
 
     private class CountdownRow extends LinearLayout {
