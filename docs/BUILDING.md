@@ -1,6 +1,6 @@
 # 构建、签名与验证 / Building Week weeks
 
-返回 / Back: [简体中文](<../README.md>) · [繁體中文](<../README.zh-TW.md>) · [English](<../README.en.md>)
+返回 / Back: [简体中文](<../README.md>) · [繁體中文](<../README.zh-TraditionalChinese.md>) · [English](<../README.en.md>)
 
 ## 环境 / Requirements
 

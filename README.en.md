@@ -6,7 +6,7 @@
 
 A native Android timetable and agenda app that works offline. No registration, advertising SDKs, or analytics tracking SDKs.
 
-[简体中文](<README.md>) · [繁體中文](<README.zh-TW.md>) · **English**
+[简体中文](<README.md>) · [繁體中文](<README.zh-TraditionalChinese.md>) · **English**
 
 [PolyForm Noncommercial 1.0.0](<LICENSE>) · Modifications allowed, commercial use not
 

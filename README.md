@@ -6,7 +6,7 @@
 
 一款离线运行的原生 Android 课表与日程应用。无需注册，不接入广告或统计追踪 SDK。
 
-**简体中文** · [繁體中文](<README.zh-TW.md>) · [English](<README.en.md>)
+**简体中文** · [繁體中文](<README.zh-TraditionalChinese.md>) · [English](<README.en.md>)
 
 [PolyForm Noncommercial 1.0.0](<LICENSE>) · 允许修改，禁止商业使用
 

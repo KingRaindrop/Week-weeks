@@ -50,7 +50,7 @@ $files = @(
     "LICENSE",
     "README.md",
     "README.en.md",
-    "README.zh-TW.md",
+    "README.zh-TraditionalChinese.md",
     "build.gradle",
     "settings.gradle",
     "gradle.properties",

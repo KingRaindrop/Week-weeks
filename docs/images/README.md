@@ -1,6 +1,6 @@
 # README 图片 / Image notes
 
-返回 / Back: [简体中文](<../../README.md>) · [繁體中文](<../../README.zh-TW.md>) · [English](<../../README.en.md>)
+返回 / Back: [简体中文](<../../README.md>) · [繁體中文](<../../README.zh-TraditionalChinese.md>) · [English](<../../README.en.md>)
 
 ## 素材 / Assets
 
