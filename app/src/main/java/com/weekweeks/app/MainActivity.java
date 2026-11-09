@@ -341,7 +341,7 @@ public class MainActivity extends AppCompatActivity {
         ensureNotificationPermission();
         maybeSendDebugReminderTestNotification(getIntent());
         scheduleClassReminderNotifications();
-        maybePromptCalendarSetup();
+        // Calendar setup belongs to a successful timetable import, not app launch.
         if (savedInstanceState != null) {
             String importUri = savedInstanceState.getString(STATE_IMPORT_URI);
             if (importUri != null) {
@@ -4732,13 +4732,14 @@ public class MainActivity extends AppCompatActivity {
                     imported++;
                 }
 
-                if (imported > 0 || updated > 0) {
+                final boolean importedChanges = imported > 0 || updated > 0;
+                if (importedChanges) {
                     if (!saveCourses(candidate)) {
                         return;
                     }
                     selectedDay = parsedCourses.get(0).day;
                     viewingWeek = 0;
-        pastelBrowseDate = 0;
+                    pastelBrowseDate = 0;
                     render();
                 }
 
@@ -4750,9 +4751,13 @@ public class MainActivity extends AppCompatActivity {
                         .setTitle(result)
                         .setMessage(getString(R.string.main_skip_reasons, skipLog.toString()))
                         .setPositiveButton(getString(R.string.action_ok), null)
+                        .setOnDismissListener(dismissed -> {
+                            if (importedChanges) maybePromptCalendarSetup();
+                        })
                         .show());
                 } else {
                     Toast.makeText(this, result, Toast.LENGTH_LONG).show();
+                    if (importedChanges) maybePromptCalendarSetup();
                 }
             })
             .setNegativeButton(getString(R.string.action_cancel), null)

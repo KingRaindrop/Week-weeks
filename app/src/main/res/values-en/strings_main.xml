@@ -271,6 +271,6 @@
   <string name="main_week_range">Week %1$d · %2$s–%3$s</string>
   <string name="main_weeks_positive">Weeks must be greater than 0</string>
   <string name="main_weeks_truncated">Cut off at the term\'s last week: %1$s</string>
-  <string name="main_welcome_calendar_message">Course weeks, countdowns and reminders depend on the academic calendar. Enter this term\'s start and end dates.</string>
-  <string name="main_welcome_calendar_title">Welcome! Set up your academic calendar first</string>
+  <string name="main_welcome_calendar_message">Timetable imported. Enter this term\'s start and end dates so course weeks, countdowns and reminders can be calculated correctly.</string>
+  <string name="main_welcome_calendar_title">Import complete: Set up your academic calendar</string>
 </resources>

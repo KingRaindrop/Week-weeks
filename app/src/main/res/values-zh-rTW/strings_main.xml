@@ -231,8 +231,8 @@
     <string name="main_week_range">第%1$d週 · %2$s–%3$s</string>
     <string name="main_weeks_positive">週數必須大於 0</string>
     <string name="main_weeks_truncated">已依本學期最後一週截斷為 %1$s</string>
-    <string name="main_welcome_calendar_message">課程週次、倒數計時和提醒都依賴校曆，請填寫本學期的開學日和散學日。</string>
-    <string name="main_welcome_calendar_title">歡迎使用：請先設定校曆</string>
+    <string name="main_welcome_calendar_message">課表已匯入。請填寫本學期的開學日和散學日，以便正確計算課程週次、倒數計時和提醒。</string>
+    <string name="main_welcome_calendar_title">匯入完成：設定校曆</string>
     <plurals name="main_calendar_saved">
         <item quantity="other">校曆已儲存：共 %1$d 週，歷史課程已保留</item>
     </plurals>
