@@ -1,6 +1,40 @@
 # 变更日志
 
-记录每次改进的发现、处理结果、遗留问题与后续方向。与 git 提交一一对应。
+记录每次改进的发现、处理结果、遗留问题与后续方向。历史批次附对应 git 提交；未提交改动会单独注明。
+
+---
+
+## 2026-11-09 · 多语言产品 README（工作区改动，未提交）
+
+- 首页重写为简体中文产品介绍，并新增繁體中文、English 对等版本，提供语言切换链接。
+- 突出“纯净、无广告、不打扰”，依据当前依赖和权限说明无需账号、离线运行、无广告／统计追踪 SDK；不再使用“无任何第三方 SDK”等过宽表述。
+- 新增原创矢量横幅与独立演示安装的截图，使用虚构课程／个人安排，正式应用和既有用户数据不参与截图。
+- 将构建、签名与验证细节整理至 `docs/BUILDING.md`，补充图片来源说明，并将三语首页、构建文档与图片加入源码发行清单；未执行发行打包。
+- 明确权限、加密范围、备份／提醒／PDF 导入限制，并说明仓库尚无开源许可证，未擅自选择许可证或添加下载地址。
+- 验证：三语首页及配套文档共 43 处本地引用检查通过；横幅 SVG XML 有效，三张原始 1080×1920 PNG 均可解码，实机 UI 层级确认虚构课程／日程及 16 色选择器，未进行图像模型视觉审阅。发行脚本静态语法与 `git diff --check` 通过，未运行打包过程。
+- 截图演示包完成后已停用，模拟器返回正式 `com.weekweeks.app` 的首次校历设置向导，未填写正式包校历。没有提交代码。
+
+## 2026-11-09 · 默认界面统一（工作区改动，未提交）
+
+- 对外只使用 Week weeks，不再区分“原版／清新版”。debug 和 release 默认启用与 pastel 相同的最新界面。
+- 正式包名保持 `com.weekweeks.app`；`pastel` 和 `.pastel` 包名仅保留为内部兼容测试入口，不卸载已有应用、不迁移或清除数据。
+- 旧界面代码、内部 `PASTEL_UI` 开关及 `Pastel*` 类名暂保留；编译桩同步启用当前界面。
+- 新增 `DefaultInterfaceTest`，防止默认构建退回旧界面。下方更名批次中的原版／清新版描述属于当时状态，现以本节为准。
+- 验证：`assembleDebug assembleRelease assemblePastel lintRelease testDebugUnitTest testReleaseUnitTest` 全部通过；debug 和 release 各 128 项测试、0 失败，release lint 0 个问题，`git diff --check` 通过。
+- MuMu 已安装正式签名包 `com.weekweeks.app`，冷启动成功；生成的 release `BuildConfig` 确认 `PASTEL_UI=true`、`ENABLE_TEST_COURSE=false`。设备停留在首次校历设置向导，未填写测试校历；兼容测试包及两个旧应用仍保留。本轮未在首次向导之后逐屏验证。
+
+## 2026-11-09 · Week weeks 全面更名（工作区改动，未提交）
+
+- 品牌名称统一为 `Week weeks`，不区分简体中文、繁體中文或英文；“清新版”保留为 Pastel 界面样式描述。
+- 应用包名与 Java 命名空间改为 `com.weekweeks.app`，清新版包名为 `com.weekweeks.app.pastel`；源码与工具中的包名引用同步调整。
+- Gradle 工程名改为 `WeekWeeks`，源码发行包前缀改为 `week-weeks-v<版本>`。
+- 新应用使用私有偏好文件 `week_weeks`、Android Keystore 前缀 `week_weeks_` 和内部提醒 URI `weekweeks://reminder/…`。
+- 用户选择新应用从空数据开始，不自动迁移课程、日程或设置；旧应用及其数据保留，不卸载或清空。
+- 签名环境变量改为 `WEEK_WEEKS_STORE_FILE`、`WEEK_WEEKS_STORE_PASSWORD`、`WEEK_WEEKS_KEY_ALIAS`、`WEEK_WEEKS_KEY_PASSWORD`，用户级配置名改为 `week-weeks-signing.properties`，JKS 文件命名改为 `week-weeks-release.jks`。
+- **保留原有实际签名密钥、证书与 JKS 内部 alias**；项目内配置文件仍为 `secrets/release-signing.properties`。下方历史批次中的旧名称、旧配置与旧 alias 属于当时事实，不批量改写。
+- 更名验证：`assemblePastel assembleRelease lintPastel testDebugUnitTest` 通过；127 项单元测试、65 项提醒行为回归检查通过，lint 0 个问题，`git diff --check` 通过。
+- MuMu 已独立安装新清新版 `com.weekweeks.app.pastel`，冷启动成功并显示首次校历设置向导；未填写测试校历或迁移数据。旧的两个应用仍保留。正式版 APK 的包名已核对为 `com.weekweeks.app`，应用名均为 `Week weeks`。
+- 本轮没有执行发行打包脚本、提交代码或逐屏复测多语言；真实提醒推送未在新空数据应用上触发。
 
 ---
 
@@ -539,3 +573,89 @@
 ### 验证状态
 
 - `lintDebug`：0 errors / 0 warnings（原 0 errors / 7 warnings）；`security-audit.ps1`、`verify-logic.ps1`、`assembleDebug`、`assembleRelease` 全部通过。
+
+---
+
+## 2026-09-17 · 课程冲突检查修复：改地点/老师不再误报"已有课程"（v1.2.3 / versionCode 6）
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 发现的问题
+
+1. **仅修改地点/老师也会被冲突检查拦下**
+   编辑已有课程时，保存前无条件调用 `hasCourseConflict(draft)`。该方法按 `id` 排除自身、按 `day + 节次 + 周次` 判重叠。但当同一时段本就有两条记录时（例如老师永久换教室后 PDF 重导入产生的重复条目，或同一门课按周次拆分成多条），用户即使只想改「地点/老师/名称/颜色」这类与时间无关的字段，也会被判定与"另一条自己"冲突，弹出"该节次和周次已有课程"而无法保存。冲突提示还不点名到底和哪门课冲突，排查困难。
+2. **PDF 重导入把"改地点"当成新课，制造重复**
+   `hasImportedCourseDuplicate` 要求名称/周次/节次/地点/老师**全部**一致才算重复。老师永久换教室后，同一门课因 `room`/`teacher` 变化不再被判为重复，重导入会新增一条与原记录同 `day + 节次 + 周次` 的课程，直接造成问题 1 的冲突场景。
+
+### 解决的问题
+
+1. **冲突检查只在时间字段真正变化时触发**（`MainActivity.showCourseDialog` 保存逻辑）
+   - 新增 `isScheduleChanged(draft, editing)`：仅当 `day`/`period`/`endPeriod` 变化，或周次表达式语义变化（用 `TimetableRules.sameWeekExpression` 比较，"1-8周"与"1-8"视为相同）时才返回 true。
+   - 保存时改为 `if (isScheduleChanged(...)) { 冲突检查 }`；只改地点/老师/名称/颜色不再触发冲突拦截。
+2. **冲突提示点名具体课程**
+   - `hasCourseConflict` 改为返回冲突对象的 `findCourseConflict`；新增 `courseConflictMessage`，提示形如「与《高等数学》冲突：周一 第1-2节 1-16周」，便于定位是哪条记录占用时段。
+3. **PDF 导入原地更新而非新增重复**（`parsedAndShowCourses` 确认导入逻辑）
+   - `hasImportedCourseDuplicate` 改为 `findImportedCourseMatch`：以「同星期 + 同节次 + 同名称 + 同周次」判定为同一门课（不再要求地点/老师一致）。
+   - 命中同一门课时，若地点/老师有变化则**原地更新** `room`/`teacher` 并计入"更新 N 门"，完全一致才跳过；只有真正的新课才分配 id 并新增。导入结果提示扩展为「导入 X 门课程，更新 Y 门，跳过 Z 门」。
+
+### 验证状态（已通过）
+
+- `verify-logic.ps1`：`TimetableRulesTest`、`PdfCourseParserTest` 全部通过，Android Java 编译检查通过。
+- `assembleDebug`：BUILD SUCCESSFUL，产出 `app/build/outputs/apk/debug/app-debug.apk`。
+- 版本：`versionCode 5 → 6`，`versionName 1.2.2 → 1.2.3`。
+
+---
+
+## 2026-10-28 · 补完未完成的重构 + 隐私加固
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 发现的问题
+
+1. 工作区无法编译（8 处错误）：`saveCourses()` 仍为 `void` 却被当作 `boolean` 使用、`saveCourses(List)` / `deliverPendingPdfResult()` / `cancelPdfImport()` / `hasUtf16TimetableEvidence()` / `decodePdfText(byte[], boolean)` 缺失，导入流程仍调用已删除的 `removeExpiredCoursesIfNeeded`。上一节"验证已通过"的记录与实际不符。
+2. 课程提醒使用 `VISIBILITY_PUBLIC`，锁屏直接显示课程名与教室。
+3. release 包通过 `Log.d` 输出完整 PDF 解析日志（课程名/教室/教师）。
+4. PDF 导入线程不可取消，Activity 销毁后仍回调 UI；`pendingImportUri` 从未赋值，重建恢复导入不生效。
+
+### 解决的问题
+
+1. `saveCourses(List)` 通过 `ListTransaction` 先落盘、成功后才替换 `courses`；课程编辑、删除、PDF 导入都改为在副本上修改，写入失败时内存数据不被污染。
+2. `PdfCourseParser` 补齐严格解码：BOM 优先，同一 stream 内存在 UTF-16 证据时整体按 UTF-16BE 解码，否则依次尝试严格 UTF-8 / UTF-16BE / ISO-8859-1；`hasTitleOnAxis` 忽略与元数据同点的标题（不能证明任一方向），修复 `testDayMappingRejected`。
+3. PDF 导入结果经 `DeferredResult` 投递，仅在 resumed 状态显示；新增 `cancelPdfImport()`，销毁或重新导入时作废旧结果；读取权限失效给出明确提示。
+4. 提醒通知改为 `VISIBILITY_PRIVATE`，并提供不含课程细节的 `publicVersion`。
+5. 解析日志仅在 `BuildConfig.DEBUG` 下输出；错误 Toast 不再显示异常 message。
+
+### 验证状态
+
+- `TimetableRulesTest`、`PdfCourseParserTest` 全部通过；Android Java 编译检查通过。
+- `assembleDebug`、`assembleRelease`：BUILD SUCCESSFUL（离线构建，跳过 lint：本机缓存缺少 `lint-gradle:31.13.0`）。
+- 未在真机上验证通知锁屏显示和导入流程。
+
+---
+
+## 2026-10-28 · 单测迁移到 JUnit + 课程提醒关闭提示
+
+**Git 提交**：`未提交`（工作区改动）
+
+### 发现的问题
+
+1. 单测是 `tools/*Test.java` 里的 `main` 方法，只能靠 `verify-logic.ps1` 手动 javac 运行；`gradlew test` 和 Android Studio 都跑不到，导致"验证已通过"的记录与实际编译状态脱节。
+2. 应用内「课程提醒」开关关闭时，主界面没有任何提示；debug「测试课前通知」静默失败，「通知状态」行点进去跳到系统设置，但系统设置解决不了应用内开关的问题。
+
+### 解决的问题
+
+1. **JUnit 4 迁移**
+   - `app/build.gradle` 新增 `testImplementation "junit:junit:4.13.2"`。
+   - `TimetableRulesTest`（5）、`PdfCourseParserTest`（23）迁到 `app/src/test/java`，每个用例改为 `@Test`，断言逻辑不变；删除 `tools/` 下的旧副本。
+   - 新增 `ListTransactionTest`（4）、`DeferredResultTest`（5），覆盖写入失败回滚、过期 token、取消/销毁后丢弃结果。
+   - `verify-logic.ps1` 改为调用 `gradlew testDebugUnitTest`，再做 android.jar 编译检查；`package-release.ps1`、README 同步。
+2. **提醒关闭提示**
+   - 主界面状态胶囊：提醒关闭时显示「下一节 … · 提醒已关闭」（灰色），点按弹出开启确认。
+   - 设置「通知状态」行文案改为「课程提醒已关闭，不会发送任何通知；点按开启」，点按弹出同一对话框而不是跳系统设置。
+   - debug「测试课前通知」在提醒关闭时先提示，开启后自动继续发送。
+
+### 验证状态
+
+- `verify-logic.ps1`：JUnit 37 个用例全部通过（0 失败），Android Java 编译检查通过。
+- `assembleDebug`：BUILD SUCCESSFUL。
+- 未在模拟器上验证新提示的显示与交互：安装时 MuMu 虚拟机已停止（16384 端口拒绝连接）。

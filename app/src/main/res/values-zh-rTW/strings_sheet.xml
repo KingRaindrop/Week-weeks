@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PastelCourseSheet. Week syntax examples (周/单/双) stay in parser syntax. -->
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="sheet_untitled_course">未命名課程</string>
+    <string name="sheet_class_time">上課時間</string>
+    <string name="sheet_time_unset">時間待設定</string>
+    <string name="sheet_weeks">上課週</string>
+    <string name="sheet_every_week">每週</string>
+    <string name="sheet_location">地點</string>
+    <string name="sheet_location_tbd">地點待定</string>
+    <string name="sheet_teacher">老師</string>
+    <string name="sheet_not_filled">未填寫</string>
+    <string name="sheet_detail_hint">提示：在課表中長按課程，可直接進入編輯</string>
+    <string name="sheet_edit_course">編輯課程</string>
+
+    <string name="sheet_add_course">新增課程</string>
+    <string name="sheet_discard_course_title">放棄未儲存的修改？</string>
+    <string name="sheet_discard_message">關閉後，本次填寫的內容不會儲存。</string>
+    <string name="sheet_course_name">課程名稱</string>
+    <string name="sheet_course_name_hint">例如：微積分</string>
+    <string name="sheet_weekday">星期</string>
+    <string name="sheet_periods">節次</string>
+    <string name="sheet_period_start">開始</string>
+    <string name="sheet_period_end">結束</string>
+    <string name="sheet_weeks_hint" tools:ignore="TypographyDashes">例如 1-16周、1-16周单周，留空表示每週</string>
+    <string name="sheet_weeks_all_chip">1-%1$d週</string>
+    <string name="sheet_odd_weeks">單週</string>
+    <string name="sheet_even_weeks">雙週</string>
+    <string name="sheet_temporary_chip">臨時 · 從本週起</string>
+    <string name="sheet_temporary_unavailable">目前不在校曆教學週內，無法設定臨時週次</string>
+    <string name="sheet_room_hint">教室 / 地點</string>
+    <string name="sheet_color">顏色</string>
+    <string name="sheet_color_hint_shared">同名課程共用顏色；色卡為介面效果，HEX 為儲存的原色</string>
+    <string name="sheet_color_hint_presets">含 32 種低飽和預設，向下捲動查看更多</string>
+    <string name="sheet_delete_course">刪除這門課程</string>
+    <string name="sheet_delete_course_title">刪除這門課程？</string>
+    <string name="sheet_delete_course_message">《%1$s》將從所有教學週的課表中移除，此操作無法復原。</string>
+    <string name="sheet_save_changes">儲存修改</string>
+    <string name="sheet_add_to_timetable">加入課表</string>
+    <string name="sheet_period_chip_desc">%1$s第%2$d節</string>
+    <string name="sheet_period_chip_desc_time">%1$s第%2$d節，%3$s</string>
+    <string name="sheet_apply">套用</string>
+    <string name="sheet_week_unit">週</string>
+    <string name="sheet_color_fallback">顏色%1$d</string>
+    <string name="sheet_swatch_desc">%1$s，%2$s，點按選擇</string>
+    <string name="sheet_swatch_desc_selected">%1$s，%2$s，已選取</string>
+
+    <string name="sheet_think_again">再想想</string>
+
+    <string name="sheet_import_title">匯入課表</string>
+    <string name="sheet_import_pdf_sub">自動辨識從校務系統匯出的課表 PDF</string>
+    <string name="sheet_paste_title">貼上文字課表</string>
+    <string name="sheet_import_paste_sub">PDF 樣式不同而無法辨識時，依範例格式整理後貼上</string>
+    <string name="sheet_text_badge">文</string>
+    <string name="sheet_label_with_sub">%1$s，%2$s</string>
+    <string name="sheet_discard_paste_title">放棄已貼上的內容？</string>
+    <string name="sheet_discard_paste_message">關閉後，輸入框中的課表文字不會保留。</string>
+    <string name="sheet_discard">放棄</string>
+    <string name="sheet_paste_intro">每行一門課，各項以 | 分隔（也可用 Tab，方便從表格複製）。上課週、地點、老師可以留空，上課週留空表示每週都上。</string>
+    <string name="sheet_example">範例</string>
+    <string name="sheet_paste_rules" tools:ignore="TypographyDashes">星期：周一~周日、星期一、1~7 皆可\n節次：1-2、3、第9-10节\n上課週：1-16周、1-16周单周、2-16周双周、1-8周,10-16周</string>
+    <string name="sheet_your_timetable">你的課表</string>
+    <string name="sheet_paste_input_hint">把整理好的課表貼到這裡</string>
+    <string name="sheet_paste_input_desc">課表文字輸入框</string>
+    <string name="sheet_use_example">填入範例</string>
+    <string name="sheet_paste_clipboard">從剪貼簿貼上</string>
+    <string name="sheet_copy_example">複製範例</string>
+    <string name="sheet_clip_label">課表範例</string>
+    <string name="sheet_example_copied">已複製範例</string>
+    <string name="sheet_recognize">辨識課表</string>
+
+    <string name="sheet_untitled_event">未命名日程</string>
+    <string name="sheet_time">時間</string>
+    <string name="sheet_reminder">提醒</string>
+    <string name="sheet_note">備註</string>
+    <string name="sheet_none">無</string>
+    <string name="sheet_edit_event">編輯日程</string>
+    <string name="sheet_discard_event_title">放棄未儲存的日程？</string>
+    <string name="sheet_add_event">新增日程</string>
+    <string name="sheet_event">日程</string>
+    <string name="sheet_event_title_hint">例如：去圖書館</string>
+    <string name="sheet_date">日期</string>
+    <string name="sheet_today">今天</string>
+    <string name="sheet_tomorrow">明天</string>
+    <string name="sheet_day_after_tomorrow">後天</string>
+    <string name="sheet_pick_date">選擇日期…</string>
+    <string name="sheet_start_time">開始時間</string>
+    <string name="sheet_start_time_hint">如 10:00</string>
+    <string name="sheet_end_time_optional">結束時間（選填）</string>
+    <string name="sheet_end_time_hint">如 11:30</string>
+    <string name="sheet_location_optional">地點（選填）</string>
+    <string name="sheet_event_location_hint">例如：圖書館三樓</string>
+    <string name="sheet_note_optional">備註（選填）</string>
+    <string name="sheet_note_hint">想記下的細節</string>
+    <string name="sheet_custom_before">自訂：提前</string>
+    <string name="sheet_custom_minutes_desc">自訂提前提醒分鐘數</string>
+    <string name="sheet_minutes_unit">分鐘</string>
+    <string name="sheet_custom_pending">自訂 · 待填寫</string>
+    <string name="sheet_custom_reminder">自訂提醒</string>
+    <string name="sheet_remind_none">不提醒</string>
+    <string name="sheet_remind_at_start">開始時</string>
+    <plurals name="sheet_remind_days">
+        <item quantity="other">%1$d 天</item>
+    </plurals>
+    <plurals name="sheet_remind_hours">
+        <item quantity="other">%1$d 小時</item>
+    </plurals>
+    <string name="sheet_remind_minutes">%1$d 分鐘</string>
+    <string name="sheet_remind_hint">提醒受「設定 → 提醒通知」總開關控制；時間已過的提醒不會傳送。</string>
+    <string name="sheet_delete_event">刪除這條日程</string>
+    <string name="sheet_delete_event_title">刪除這條日程？</string>
+    <string name="sheet_delete_event_message">《%1$s》將被刪除，此操作無法復原。</string>
+    <string name="sheet_error_custom_empty">請選擇提醒預設或填寫自訂提前分鐘數</string>
+    <string name="sheet_error_custom_invalid">請輸入有效的提前提醒分鐘數</string>
+    <string name="sheet_reminder_passed_title">提醒時間已過</string>
+    <string name="sheet_reminder_passed_message">所選的提醒時刻已經過去，不會補發提醒。你可以返回修改時間，或將這條日程設為「不提醒」後儲存。</string>
+    <string name="sheet_save_without_reminder">不提醒並儲存</string>
+    <string name="sheet_go_back_edit">返回修改</string>
+    <string name="sheet_error_start_empty">請填寫開始時間，例如 10:00</string>
+    <string name="sheet_error_start_format">開始時間格式應為 HH:mm，例如 10:00</string>
+    <string name="sheet_error_end_format">結束時間格式應為 HH:mm，例如 11:30</string>
+    <string name="sheet_event_due">已到時間</string>
+    <string name="sheet_event_ended">已結束</string>
+    <string name="sheet_date_invalid">日期無效</string>
+    <string name="sheet_date_label">%1$d年%2$s%3$d日 %4$s</string>
+    <string name="sheet_reminder_expired_status">提醒時間已過（原設定：%1$s）</string>
+
+    <string name="sheet_mine_title">我的</string>
+    <string name="sheet_add_event_chip">＋ 新增日程</string>
+    <string name="sheet_mine_hint">日程會在所屬的那一週出現在「日程」清單中。</string>
+    <string name="sheet_mine_count">我的日程 · %1$d 項待辦</string>
+    <string name="sheet_mine_empty">還沒有日程。例如：9月24日 10:00 去圖書館</string>
+    <string name="sheet_mine_past_header">已到時間 / 已結束 · %1$d</string>
+    <string name="sheet_settings">設定</string>
+    <string name="sheet_settings_sub">匯入、提醒、節次、校曆與介面色調</string>
+    <string name="sheet_mine_row_desc">%1$s，%2$s，點按查看</string>
+    <string name="sheet_mine_row_desc_past">%1$s，%2$s，%3$s，點按查看</string>
+
+    <string-array name="sheet_weekday_chips">
+        <item>一</item>
+        <item>二</item>
+        <item>三</item>
+        <item>四</item>
+        <item>五</item>
+        <item>六</item>
+        <item>日</item>
+    </string-array>
+    <string-array name="sheet_weekday_names">
+        <item>週一</item>
+        <item>週二</item>
+        <item>週三</item>
+        <item>週四</item>
+        <item>週五</item>
+        <item>週六</item>
+        <item>週日</item>
+    </string-array>
+    <string-array name="sheet_month_labels">
+        <item>1月</item>
+        <item>2月</item>
+        <item>3月</item>
+        <item>4月</item>
+        <item>5月</item>
+        <item>6月</item>
+        <item>7月</item>
+        <item>8月</item>
+        <item>9月</item>
+        <item>10月</item>
+        <item>11月</item>
+        <item>12月</item>
+    </string-array>
+</resources>

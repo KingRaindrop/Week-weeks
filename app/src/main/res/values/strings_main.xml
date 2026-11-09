@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- MainActivity (part "main"). Keys must exist in values, values-zh-rTW and values-en. -->
+    <string name="main_accent_summary">选择主色调，全局生效</string>
+    <string name="main_accent_title">界面色调</string>
+    <string name="main_add_course">添加课程</string>
+    <string name="main_add_course_cta">＋ 添加课程</string>
+    <string name="main_add_period_rule">添加节次规则</string>
+    <string name="main_add_personal_event">添加个人日程</string>
+    <string name="main_add_term_course">添加学期课程</string>
+    <string name="main_added_to_timetable">已添加到课表</string>
+    <string name="main_allow_notifications_first">请先允许通知权限</string>
+    <string name="main_app_notifications_off">系统已关闭本应用通知，请先在通知设置中开启</string>
+    <string name="main_back_to_this_week">返回本周</string>
+    <string name="main_break_prefix">"假期 · "</string>
+    <string name="main_calendar_message">总周数会按开学日和散学日自动计算。</string>
+    <string name="main_calendar_save_failed">校历保存失败，请检查设备存储状态</string>
+    <string name="main_calendar_settings">校历设置</string>
+    <string name="main_calendar_manual_name">手动设置校历</string>
+    <string name="main_calendar_settings_summary">设置开学日和散学日</string>
+    <string name="main_changes_saved">已保存修改</string>
+    <string name="main_choose_week">选择周次</string>
+    <string name="main_class_over">已下课</string>
+    <string name="main_config_deleted">当前配置已删除</string>
+    <string name="main_confirm_import">确认导入</string>
+    <string name="main_conflict_with">与《%1$s》冲突：</string>
+    <string name="main_countdown_end_prefix">"距离下课还有 "</string>
+    <string name="main_countdown_end_under_minute">距离下课还有 不到 1 分钟</string>
+    <string name="main_countdown_end_unknown">距离下课还有 —</string>
+    <string name="main_countdown_h">%1$s%2$d 小时</string>
+    <string name="main_countdown_hm">%1$s%2$d 小时 %3$d 分钟</string>
+    <string name="main_countdown_m">%1$s%2$d 分钟</string>
+    <string name="main_countdown_prefix_minutes">"%1$s%2$d 分 "</string>
+    <string name="main_countdown_seconds_suffix">" 秒"</string>
+    <string name="main_countdown_start_prefix">"距离上课还有 "</string>
+    <string name="main_course_deleted">课程已删除</string>
+    <string name="main_course_gone">这门课程已不存在，无法恢复编辑</string>
+    <string name="main_course_limit">课程数量已达到上限</string>
+    <string name="main_course_name_required">课程名称不能为空</string>
+    <string name="main_courses_corrupt">课表数据格式异常，已忽略损坏内容</string>
+    <string name="main_courses_decrypt_failed">课表数据解密失败，已阻止覆盖原数据</string>
+    <string name="main_courses_encrypt_failed">课表加密保存失败</string>
+    <string name="main_courses_write_failed">课表写入失败，请检查设备存储状态</string>
+    <string name="main_date_format">日期格式应为 YYYY-MM-DD</string>
+    <string name="main_date_pattern_month_day">M月d日</string>
+    <string name="main_delete_config">删除当前配置</string>
+    <string name="main_delete_config_failed">配置删除失败，原有课程和提醒已保留，请检查设备存储状态</string>
+    <string name="main_delete_config_message">这会删除已保存的课程、校历设置和提醒排程。亮暗模式和「我的日程」不会被删除。</string>
+    <string name="main_delete_config_summary">删除课程、校历和提醒排程</string>
+    <string name="main_delete_course_message">将删除《%1$s》的整条课程安排（包含所有上课周），此操作不可撤销。</string>
+    <string name="main_delete_course_title">删除课程？</string>
+    <string name="main_edit_course">编辑课程</string>
+    <string name="main_end_after_start">结束时间必须晚于开始时间</string>
+    <string name="main_end_before_start">散学日不能早于开学日</string>
+    <string name="main_enter_course_name">请填写课程名称</string>
+    <string name="main_event">日程</string>
+    <string name="main_event_added">日程已添加</string>
+    <string name="main_event_deleted">日程已删除</string>
+    <string name="main_event_deleted_already">这条日程已被删除</string>
+    <string name="main_event_gone">这条日程已不存在，无法恢复编辑</string>
+    <string name="main_event_limit">日程数量已达到上限（%1$d 条）</string>
+    <string name="main_event_saved">日程已保存</string>
+    <string name="main_events_locked_edit">日程数据无法读取，暂时不能编辑</string>
+    <string name="main_events_locked_save">日程数据无法读取，已阻止覆盖保存</string>
+    <string name="main_events_save_failed">日程保存失败，请检查设备存储状态</string>
+    <string name="main_events_unreadable">日程数据无法读取，已阻止覆盖原数据</string>
+    <string name="main_feature_next_day">下一节 · %1$s</string>
+    <string name="main_feature_now">正在上</string>
+    <string name="main_feature_plan">学习计划</string>
+    <string name="main_feature_preview">课表预览</string>
+    <string name="main_font_save_failed">字体设置保存失败，请检查设备存储状态</string>
+    <string name="main_font_title">界面字体</string>
+    <string name="main_got_it">知道了</string>
+    <string name="main_hint_course_name">课程名称</string>
+    <string name="main_hint_room">教室 / 地点</string>
+    <string name="main_hint_weeks" tools:ignore="TypographyDashes">例如 1-6周,9-17周,1-16周单周</string>
+    <string name="main_import_error">导入错误: %1$s</string>
+    <string name="main_import_pdf">导入 PDF 课表</string>
+    <string name="main_import_pdf_summary">从文件解析课程、周次和教室</string>
+    <string name="main_import_result_imported">导入 %1$d 门课程</string>
+    <string name="main_import_result_skipped">，跳过 %1$d 门</string>
+    <string name="main_import_result_title">课程识别结果</string>
+    <string name="main_import_result_updated">，更新 %1$d 门</string>
+    <string name="main_label_color">颜色</string>
+    <string name="main_label_course">课程</string>
+    <string name="main_label_day">星期</string>
+    <string name="main_label_end_period">结束节次</string>
+    <string name="main_label_end_time">结束时间</string>
+    <string name="main_label_room">地点</string>
+    <string name="main_label_start_period">开始节次</string>
+    <string name="main_label_start_time">开始时间</string>
+    <string name="main_label_teacher">老师</string>
+    <string name="main_label_term_end">散学日</string>
+    <string name="main_label_term_start">开学日（所在的周一至周日为第1周）</string>
+    <string name="main_label_weeks">上课周</string>
+    <string name="main_locked_cannot_import">加密数据未解锁，暂时不能导入</string>
+    <string name="main_locked_cannot_save">加密数据未解锁，暂时不能保存新内容</string>
+    <string name="main_locked_refuse_save">加密数据未解锁，已拒绝覆盖保存</string>
+    <string name="main_max_periods">最多只能设置 %1$d 节</string>
+    <string name="main_min_one_period">至少需要保留 1 节课</string>
+    <string name="main_more_errors">… 另有 %1$d 处</string>
+    <string name="main_need_more_periods_message">%1$s 中识别到 %2$d 条课程安排，包含第 %3$d 节，但当前仅设置了 %4$d 节。为避免晚课丢失或提醒时间错误，本次尚未导入任何课程。\n\n请在节次设置中补充到至少 %3$d 节，并填写学校实际时间，然后重新导入。</string>
+    <string name="main_need_more_periods_title">请先补充节次时间</string>
+    <string name="main_next_class">下一节课</string>
+    <string name="main_next_week">下一周</string>
+    <string name="main_no_class_dates">所选星期和周次在当前校历内没有上课日期，请调整周次或校历</string>
+    <string name="main_no_courses">暂无课程</string>
+    <string name="main_no_courses_found">没有在%1$s中识别到课程</string>
+    <string name="main_no_courses_to_color">当前没有可配色的课程，请先添加或导入课表</string>
+    <string name="main_no_upcoming">暂无后续课程</string>
+    <string name="main_not_now">暂不</string>
+    <string name="main_not_started_prefix">"未开学 · "</string>
+    <string name="main_notification_permission_denied">通知权限未允许，课前提醒不会弹出</string>
+    <string name="main_notification_status">通知状态</string>
+    <string name="main_outside_term">学期外</string>
+    <string name="main_outside_term_message">课程按校历教学周安排，不会出现在当前日期。临时安排请添加个人日程；若要编辑学期课表，保存后将跳转到有课的教学周。</string>
+    <string name="main_outside_term_title">当前查看的是学期外日期</string>
+    <string name="main_parsing_pdf">正在解析 PDF 课表…</string>
+    <string name="main_paste_import">粘贴文本课表</string>
+    <string name="main_paste_import_summary">PDF 识别不了时，按示例格式粘贴导入</string>
+    <string name="main_pasted_text_source">粘贴的文本</string>
+    <string name="main_pastel_msg_default">课程与个人安排请查看日程列表</string>
+    <string name="main_pastel_msg_outside">学期外 · 可查看和添加个人日程</string>
+    <string name="main_pastel_msg_preview">正在查看其他周；编辑会修改实际课表</string>
+    <string name="main_pdf_import_failed">PDF 导入失败: %1$s</string>
+    <string name="main_pdf_permission_lost">PDF 读取权限已失效，请重新选择文件</string>
+    <string name="main_pdf_too_large">PDF 文件超过 5MB，已拒绝导入</string>
+    <string name="main_pdf_unreadable">无法读取 PDF 文件</string>
+    <string name="main_period_badge_label">节</string>
+    <string name="main_period_delete_blocked">该节次或后续节次已有课程，删除会改变课程时间；只能删除末尾未使用的节次</string>
+    <string name="main_period_format_invalid">第 %1$d 节格式不正确</string>
+    <string name="main_period_in_use">已有课程使用第 %1$d 节，不能删到更少</string>
+    <string name="main_period_n">第 %1$d 节</string>
+    <string name="main_period_rules_hint">每条规则对应一天中的一节课，按从早到晚排列</string>
+    <string name="main_period_save_failed">节次设置保存失败，请检查设备存储状态</string>
+    <string name="main_period_saved">节次设置已保存</string>
+    <string name="main_period_settings">课程节次设置</string>
+    <string name="main_period_settings_summary">设置第 1 节到第 N 节的时间</string>
+    <string name="main_period_time_invalid">第 %1$d 节时间不正确</string>
+    <string name="main_period_with_time">第 %1$d 节 · %2$s</string>
+    <string name="main_periods_order">节次时间需要按从早到晚排列，且不能重叠</string>
+    <string name="main_pick_date_title">选择日期，查看所在周</string>
+    <string name="main_popup_location">地点：%1$s</string>
+    <string name="main_popup_time">时间：%1$s</string>
+    <string name="main_precision_exact">精确</string>
+    <string name="main_precision_inexact">可能受系统节电策略延迟</string>
+    <string name="main_prev_week">上一周</string>
+    <string name="main_preview_chip">预览模式 · 点按回到本周</string>
+    <string name="main_preview_courses">【课程预览】</string>
+    <string name="main_preview_days">【课程分布】</string>
+    <string name="main_preview_item">"%1$d. %2$s\n   %3$s 第%4$d-%5$d节 %6$s\n"</string>
+    <string name="main_preview_more">… 还有 %1$d 门</string>
+    <string name="main_preview_parsed">成功解析: %1$d 门课程</string>
+    <string name="main_preview_per_day">"%1$s: %2$d门  "</string>
+    <string name="main_preview_per_period">"第%1$d节: %2$d次  "</string>
+    <string name="main_preview_periods">【节次分布】</string>
+    <string name="main_preview_stats">【解析统计】</string>
+    <string name="main_randomize_button">随机配色</string>
+    <string name="main_randomize_colors">一键随机配色</string>
+    <string name="main_randomize_colors_summary">优先明快预设色，同名课程保持同色</string>
+    <string name="main_randomize_message" formatted="false">将重新分配当前课表全部课程的颜色，覆盖手动选色。同名课程保持同色，使用12种精选配色，每轮用完前不重复，超过12门时循环分配；手动选色仍保留42色。已上完课程在亮色模式保留原色，以30%背景不透明度的效果淡化，文字保持清晰；暗色模式保持轻度淡化。课程时间和其他信息不会改变。</string>
+    <string name="main_reminders">提醒通知</string>
+    <string name="main_reminders_off_desc">%1$s，提醒通知已关闭，点按开启</string>
+    <string name="main_reminders_off_message">当前已关闭「提醒通知」，课程和个人日程均不会发送提醒。</string>
+    <string name="main_reminders_off_title">提醒通知已关闭</string>
+    <string name="main_reminders_on_toast">提醒通知已开启</string>
+    <string name="main_reminders_summary">控制课程与个人日程的提醒通知</string>
+    <string name="main_reset_font_size">恢复默认字号</string>
+    <string name="main_reset_periods">恢复默认 1-%1$d 节</string>
+    <string name="main_save_failed_retry">保存失败，请稍后重试</string>
+    <string name="main_section_appearance">外观</string>
+    <string name="main_section_data">数据</string>
+    <string name="main_section_time">时间</string>
+    <string name="main_section_timetable">课表</string>
+    <string name="main_selected_short_suffix">，已选</string>
+    <string name="main_selected_suffix">，已选择</string>
+    <string name="main_serialize_failed">课表序列化失败</string>
+    <string name="main_set_periods">设置节次</string>
+    <string name="main_settings">设置</string>
+    <string name="main_shake_stop_desc">%1$s，双击停止课前抖动</string>
+    <string name="main_shake_stopped">已停止本节课抖动</string>
+    <string name="main_show_teacher">显示老师姓名</string>
+    <string name="main_show_teacher_summary">在周课表和列表中显示，详情始终保留</string>
+    <string name="main_skip_exists">%1$s: 已存在</string>
+    <string name="main_skip_limit">%1$s: 达到上限</string>
+    <string name="main_skip_reasons">跳过原因:\n%1$s</string>
+    <string name="main_starting_soon">即将上课</string>
+    <string name="main_state_off">已关闭</string>
+    <string name="main_state_on">已开启</string>
+    <string name="main_status_blocked">已被系统关闭，点击恢复</string>
+    <string name="main_status_channel_off">提醒通知频道已关闭，点击恢复</string>
+    <string name="main_status_next">下一节 %1$s%2$s %3$s</string>
+    <string name="main_status_none_pending">可用；当前没有待触发的提醒</string>
+    <string name="main_status_not_granted">未授权，点击前往系统设置</string>
+    <string name="main_status_now">正在上 %1$s %2$s</string>
+    <string name="main_status_reminders_off">提醒通知已关闭，不会发送任何通知；点按开启</string>
+    <string name="main_status_scheduled">可用；已安排 %1$d 项，下一次 %2$s（%3$s）</string>
+    <string name="main_status_service_unavailable">系统通知服务不可用</string>
+    <string name="main_status_submit_failed">提醒规则已保存，但系统闹钟提交失败；点击检查设置</string>
+    <string name="main_storage_locked_warning">⚠️ 加密课表无法读取\n\n为避免覆盖原数据，已暂停保存。\n请检查系统密钥或清除应用数据后重新开始。</string>
+    <string name="main_switch_to_dark">切换到暗黑模式</string>
+    <string name="main_switch_to_light">切换到亮色模式</string>
+    <string name="main_tap_to_select_suffix">，点按选择</string>
+    <string name="main_temp_weeks_message">从当前第 %1$d 周开始，只上 N 周。</string>
+    <string name="main_temp_weeks_outside">当前不在校历教学周内，无法设置临时周次</string>
+    <string name="main_temp_weeks_title">临时课程周数</string>
+    <string name="main_temporary_weeks_button">临时课程：从本周开始上 N 周</string>
+    <string name="main_test_course_name">灵动岛测试课程</string>
+    <string name="main_test_course_room">当前节次</string>
+    <string name="main_test_course_teacher">不保存</string>
+    <string name="main_test_course_weeks">临时测试</string>
+    <string name="main_test_reminder">测试课前通知</string>
+    <string name="main_test_reminder_course">课前通知测试</string>
+    <string name="main_test_reminder_room">模拟器测试</string>
+    <string name="main_test_reminder_summary">在调试包中立即弹出一次提醒</string>
+    <string name="main_test_send_failed">测试通知发送失败，请检查通知开关</string>
+    <string name="main_test_sent">已发送一条测试通知</string>
+    <string name="main_this_week">本周</string>
+    <string name="main_this_week_prefix">"本周 · "</string>
+    <string name="main_this_week_suffix">，本周</string>
+    <string name="main_time_format">时间格式应为 HH:mm，例如 08:00</string>
+    <string name="main_time_not_set">时间未设置</string>
+    <string name="main_title">@string/app_name</string>
+    <string name="main_title_subtitle_desc">%1$s，%2$s</string>
+    <string name="main_today">今天</string>
+    <string name="main_today_suffix">，今天</string>
+    <string name="main_toggle_desc">%1$s，%2$s，点按切换</string>
+    <string name="main_turn_on_reminders">开启提醒</string>
+    <string name="main_week_n">第%1$d周</string>
+    <string name="main_week_prefix">"第%1$d周 · "</string>
+    <string name="main_week_range">第%1$d周 · %2$s–%3$s</string>
+    <string name="main_weeks_positive">周数必须大于 0</string>
+    <string name="main_weeks_truncated">已按本学期最后一周截断为 %1$s</string>
+    <string name="main_welcome_calendar_message">课程周次、倒计时和提醒都依赖校历，请填写本学期的开学日和散学日。</string>
+    <string name="main_welcome_calendar_title">欢迎使用：请先设置校历</string>
+    <plurals name="main_calendar_saved">
+        <item quantity="other">校历已保存：共 %1$d 周，历史课程已保留</item>
+    </plurals>
+    <plurals name="main_invalid_weeks">
+        <item quantity="other">有 %1$d 门课程的上课周格式无法识别，请打开课程并修正；这些课程不会安排通知</item>
+    </plurals>
+    <plurals name="main_paste_lines_need_fix">
+        <item quantity="other">有 %1$d 行需要修改，修改后再识别：\n%2$s</item>
+    </plurals>
+    <plurals name="main_randomized_count">
+        <item quantity="other">已为 %1$d 门课程随机配色</item>
+    </plurals>
+    <plurals name="main_summary_courses">
+        <item quantity="other">%1$s%2$s · %3$d 门课</item>
+    </plurals>
+    <string-array name="main_course_color_names">
+        <item>青色</item>
+        <item>蓝色</item>
+        <item>绿色</item>
+        <item>紫色</item>
+        <item>陶土红</item>
+        <item>赭黄</item>
+        <item>墨绿</item>
+        <item>蓝灰</item>
+        <item>玫瑰红</item>
+        <item>橄榄绿</item>
+    </string-array>
+    <string-array name="main_days_short">
+        <item>周一</item>
+        <item>周二</item>
+        <item>周三</item>
+        <item>周四</item>
+        <item>周五</item>
+        <item>周六</item>
+        <item>周日</item>
+    </string-array>
+</resources>

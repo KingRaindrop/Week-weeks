@@ -3,11 +3,11 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $manifestPath = Join-Path $root "app/src/main/AndroidManifest.xml"
-$activityPath = Join-Path $root "app/src/main/java/com/example/meinstundenplan/MainActivity.java"
-$secureStoragePath = Join-Path $root "app/src/main/java/com/example/meinstundenplan/SecureStorage.java"
-$reminderReceiverPath = Join-Path $root "app/src/main/java/com/example/meinstundenplan/ClassReminderReceiver.java"
-$reminderSchedulerPath = Join-Path $root "app/src/main/java/com/example/meinstundenplan/ReminderScheduler.java"
-$bootReceiverPath = Join-Path $root "app/src/main/java/com/example/meinstundenplan/ReminderBootReceiver.java"
+$activityPath = Join-Path $root "app/src/main/java/com/weekweeks/app/MainActivity.java"
+$secureStoragePath = Join-Path $root "app/src/main/java/com/weekweeks/app/SecureStorage.java"
+$reminderReceiverPath = Join-Path $root "app/src/main/java/com/weekweeks/app/ClassReminderReceiver.java"
+$reminderSchedulerPath = Join-Path $root "app/src/main/java/com/weekweeks/app/ReminderScheduler.java"
+$bootReceiverPath = Join-Path $root "app/src/main/java/com/weekweeks/app/ReminderBootReceiver.java"
 $rulesPath = Join-Path $root "app/src/main/res/xml/data_extraction_rules.xml"
 $appBuildPath = Join-Path $root "app/build.gradle"
 

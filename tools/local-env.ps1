@@ -8,14 +8,14 @@
 #
 # local.properties is machine-local and git-ignored; it is never published.
 
-function Get-MeinJavaHome {
+function Get-WeekWeeksJavaHome {
     if ($env:JAVA_HOME -and (Test-Path -LiteralPath $env:JAVA_HOME)) {
         return $env:JAVA_HOME
     }
     throw "JAVA_HOME is not set. Point it at a JDK 17+ (for example the JBR bundled with Android Studio)."
 }
 
-function Get-MeinAndroidHome {
+function Get-WeekWeeksAndroidHome {
     if ($env:ANDROID_HOME -and (Test-Path -LiteralPath $env:ANDROID_HOME)) {
         return $env:ANDROID_HOME
     }
@@ -37,7 +37,7 @@ function Get-MeinAndroidHome {
     throw "Android SDK not found. Set ANDROID_HOME or declare sdk.dir in local.properties."
 }
 
-function Get-MeinGradleUserHome {
+function Get-WeekWeeksGradleUserHome {
     if ($env:GRADLE_USER_HOME -and (Test-Path -LiteralPath $env:GRADLE_USER_HOME)) {
         return $env:GRADLE_USER_HOME
     }

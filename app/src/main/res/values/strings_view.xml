@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="view_days">
+        <item>周一</item>
+        <item>周二</item>
+        <item>周三</item>
+        <item>周四</item>
+        <item>周五</item>
+        <item>周六</item>
+        <item>周日</item>
+    </string-array>
+    <string name="view_hint">点按课程查看详情，长按编辑；长按空白格添加课程</string>
+    <string name="view_empty_default">还没有课程，长按空白格添加</string>
+    <string name="view_title">课表</string>
+    <string name="view_import_timetable">导入课表</string>
+    <string name="view_switch_light">切换到亮色模式</string>
+    <string name="view_switch_dark">切换到暗色模式</string>
+    <string name="view_timetable_settings">课表设置</string>
+    <string name="view_status_schedule">课程安排</string>
+    <string name="view_status_preview">课表预览</string>
+    <string name="view_status_plan">学习计划</string>
+    <string name="view_hero_new_day">新的一天，从容出发</string>
+    <string name="view_hero_add_courses">添加课程，开启你的学习计划</string>
+    <string name="view_hero_desc">课程概览；点按查看详情，长按编辑</string>
+    <string name="view_hero_unavailable">课表暂不可用</string>
+    <string name="view_hero_free_time">留一点时间，给新的可能</string>
+    <string name="view_hero_check_storage">请前往设置检查存储状态</string>
+    <string name="view_hero_outside_term">学期外安排请在日程中添加</string>
+    <string name="view_hero_long_press_add">长按空白课格，即可添加课程</string>
+    <string name="view_previous_week">上一周</string>
+    <string name="view_next_week">下一周</string>
+    <string name="view_this_week">本周</string>
+    <string name="view_this_week_short">本周</string>
+    <string name="view_pick_week_desc">选择日期查看所在周，支持学期外日程</string>
+    <string name="view_back_to_this_week">回到本周</string>
+    <string name="view_segment_week">周视图</string>
+    <string name="view_segment_list">列表</string>
+    <string name="view_tab_timetable">课表</string>
+    <string name="view_tab_agenda">日程</string>
+    <string name="view_tab_mine">我的</string>
+    <string name="view_teaching_week">教学周</string>
+    <string name="view_untitled_course">未命名课程</string>
+    <string name="view_untitled_event">未命名日程</string>
+    <string name="view_location_tbd">地点待定</string>
+    <string name="view_room_tbd_short">待定</string>
+    <string name="view_period_range">第%1$d–%2$d节</string>
+    <string name="view_period_single">第%1$d节</string>
+    <string name="view_period_heading">节次</string>
+    <string name="view_notice_storage">存储暂不可用 · 请前往设置查看；现有数据不会被覆盖。</string>
+    <string name="view_notice_outside_term">学期外不排课程，请在日程中添加个人安排。</string>
+    <string name="view_notice_preview">正在查看其他周；编辑会修改实际课表。</string>
+    <string name="view_countdown_ended">已下课</string>
+    <string name="view_countdown_started">已上课</string>
+    <string name="view_countdown_days_hours">%1$d天%2$d小时</string>
+    <string name="view_countdown_hours_minutes">%1$d小时%2$02d分</string>
+    <string name="view_spoken_pair">%1$s%2$s</string>
+    <string name="view_open_settings">前往设置</string>
+    <string name="view_add_course">添加课程</string>
+    <string name="view_finished">已上完</string>
+    <string name="view_add_event_button">＋ 添加日程</string>
+    <string name="view_add_event">添加日程</string>
+    <string name="view_event_badge">日程</string>
+    <string name="view_event_ended">已结束</string>
+    <string name="view_event_due">已到时间</string>
+    <string name="view_event_desc">日程，%1$s，%2$s，%3$s%4$s，点按查看</string>
+    <string name="view_desc_suffix">，%1$s</string>
+    <string name="view_course_desc">%1$s，%2$s，第%3$d至%4$d节，%5$s，%6$s</string>
+    <string name="view_cell_desc">%1$s，第%2$d节，长按添加课程</string>
+    <string name="view_cell_outside_term_desc">%1$s，学期外，点按查看日程，长按添加个人日程</string>
+    <string name="view_toast_outside_term">学期外安排请点击「添加日程」</string>
+    <string name="view_toast_long_press_add">长按空白格添加课程</string>
+    <string name="view_toast_storage">存储暂不可用，请在设置中检查</string>
+    <string name="view_time_unset">时间待设置</string>
+    <string name="view_now_clock">现在 %1$02d:%2$02d</string>
+    <string name="view_discard_title">放弃未保存的修改？</string>
+    <string name="view_discard_message">课程修改尚未保存，退出后将丢弃本次修改。</string>
+    <string name="view_reminder_default_event">日程</string>
+    <string name="view_reminder_default_course">下一节课</string>
+    <string name="view_reminder_title_event">日程提醒</string>
+    <string name="view_reminder_title_course">课程提醒</string>
+    <string name="view_channel_name">提醒通知</string>
+    <string name="view_channel_description">课程与个人日程的开始提醒</string>
+    <string name="view_font_system">跟随系统</string>
+    <plurals name="view_unit_days">
+        <item quantity="other">%d天</item>
+    </plurals>
+    <plurals name="view_unit_hours">
+        <item quantity="other">%d小时</item>
+    </plurals>
+    <plurals name="view_unit_minutes">
+        <item quantity="other">%d分钟</item>
+    </plurals>
+</resources>

@@ -11,3 +11,11 @@ secrets/*
 artifacts/
 dist/
 samples/
+
+# OPPO Sans is a proprietary typeface and is not redistributed here. Keep a local copy at
+# app/src/main/assets/fonts/oppo_sans.ttf to enable the preset; without it the app falls back
+# to the system font and everything else keeps working.
+app/src/main/assets/fonts/*.ttf
+
+# Scratch harness used to dump parser output for one local PDF.
+tools/ReproRun.java

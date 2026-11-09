@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+  <string-array name="sheet_month_labels">
+    <item>Jan</item>
+    <item>Feb</item>
+    <item>Mar</item>
+    <item>Apr</item>
+    <item>May</item>
+    <item>Jun</item>
+    <item>Jul</item>
+    <item>Aug</item>
+    <item>Sep</item>
+    <item>Oct</item>
+    <item>Nov</item>
+    <item>Dec</item>
+  </string-array>
+  <string-array name="sheet_weekday_chips">
+    <item>Mon</item>
+    <item>Tue</item>
+    <item>Wed</item>
+    <item>Thu</item>
+    <item>Fri</item>
+    <item>Sat</item>
+    <item>Sun</item>
+  </string-array>
+  <string-array name="sheet_weekday_names">
+    <item>Mon</item>
+    <item>Tue</item>
+    <item>Wed</item>
+    <item>Thu</item>
+    <item>Fri</item>
+    <item>Sat</item>
+    <item>Sun</item>
+  </string-array>
+  <plurals name="sheet_remind_days">
+    <item quantity="one">%1$d day</item>
+    <item quantity="other">%1$d days</item>
+  </plurals>
+  <plurals name="sheet_remind_hours">
+    <item quantity="one">%1$d hr</item>
+    <item quantity="other">%1$d hrs</item>
+  </plurals>
+  <string name="sheet_add_course">Add course</string>
+  <string name="sheet_add_event">Add event</string>
+  <string name="sheet_add_event_chip">＋ Add event</string>
+  <string name="sheet_add_to_timetable">Add to timetable</string>
+  <string name="sheet_apply">Apply</string>
+  <string name="sheet_class_time">Class time</string>
+  <string name="sheet_clip_label">Timetable example</string>
+  <string name="sheet_color">Color</string>
+  <string name="sheet_color_fallback">Color %1$d</string>
+  <string name="sheet_color_hint_presets">32 muted presets. Scroll down for more.</string>
+  <string name="sheet_color_hint_shared">Courses with the same name share a color. Swatches show the on-screen tone; HEX is the saved color.</string>
+  <string name="sheet_copy_example">Copy example</string>
+  <string name="sheet_course_name">Course name</string>
+  <string name="sheet_course_name_hint">e.g. Calculus</string>
+  <string name="sheet_custom_before">Custom:</string>
+  <string name="sheet_custom_minutes_desc">Custom reminder, minutes before</string>
+  <string name="sheet_custom_pending">Custom · not set</string>
+  <string name="sheet_custom_reminder">Custom reminder</string>
+  <string name="sheet_date">Date</string>
+  <string name="sheet_date_invalid">Invalid date</string>
+  <string name="sheet_date_label">%4$s, %2$s %3$d, %1$d</string>
+  <string name="sheet_day_after_tomorrow">In 2 days</string>
+  <string name="sheet_delete_course">Delete this course</string>
+  <string name="sheet_delete_course_message">“%1$s” will be removed from the timetable in every teaching week. This can\'t be undone.</string>
+  <string name="sheet_delete_course_title">Delete this course?</string>
+  <string name="sheet_delete_event">Delete this event</string>
+  <string name="sheet_delete_event_message">“%1$s” will be deleted. This can\'t be undone.</string>
+  <string name="sheet_delete_event_title">Delete this event?</string>
+  <string name="sheet_detail_hint">Tip: long-press a course in the timetable to edit it directly</string>
+  <string name="sheet_discard">Discard</string>
+  <string name="sheet_discard_course_title">Discard unsaved changes?</string>
+  <string name="sheet_discard_event_title">Discard unsaved event?</string>
+  <string name="sheet_discard_message">If you close now, what you entered won\'t be saved.</string>
+  <string name="sheet_discard_paste_message">If you close now, the timetable text in the box won\'t be kept.</string>
+  <string name="sheet_discard_paste_title">Discard pasted text?</string>
+  <string name="sheet_edit_course">Edit course</string>
+  <string name="sheet_edit_event">Edit event</string>
+  <string name="sheet_end_time_hint">e.g. 11:30</string>
+  <string name="sheet_end_time_optional">End time (optional)</string>
+  <string name="sheet_error_custom_empty">Pick a reminder preset or enter custom minutes</string>
+  <string name="sheet_error_custom_invalid">Enter a valid number of minutes</string>
+  <string name="sheet_error_end_format">End time must be HH:mm, e.g. 11:30</string>
+  <string name="sheet_error_start_empty">Enter a start time, e.g. 10:00</string>
+  <string name="sheet_error_start_format">Start time must be HH:mm, e.g. 10:00</string>
+  <string name="sheet_even_weeks">Even weeks</string>
+  <string name="sheet_event">Event</string>
+  <string name="sheet_event_due">Time reached</string>
+  <string name="sheet_event_ended">Ended</string>
+  <string name="sheet_event_location_hint">e.g. Library, 3rd floor</string>
+  <string name="sheet_event_title_hint">e.g. Go to the library</string>
+  <string name="sheet_every_week">Every week</string>
+  <string name="sheet_example">Example</string>
+  <string name="sheet_example_copied">Example copied</string>
+  <string name="sheet_go_back_edit">Go back</string>
+  <string name="sheet_import_paste_sub">If your PDF can\'t be read, format it like the example and paste it</string>
+  <string name="sheet_import_pdf_sub">Reads a timetable PDF exported from your school system</string>
+  <string name="sheet_import_title">Import timetable</string>
+  <string name="sheet_label_with_sub">%1$s, %2$s</string>
+  <string name="sheet_location">Location</string>
+  <string name="sheet_location_optional">Location (optional)</string>
+  <string name="sheet_location_tbd">Location TBD</string>
+  <string name="sheet_mine_count" tools:ignore="PluralsCandidate">My events · %1$d upcoming</string>
+  <string name="sheet_mine_empty">No events yet. For example: Sep 24, 10:00, go to the library</string>
+  <string name="sheet_mine_hint">Events appear in the Events list during the week they fall in.</string>
+  <string name="sheet_mine_past_header">Past or ended · %1$d</string>
+  <string name="sheet_mine_row_desc">%1$s, %2$s, tap to view</string>
+  <string name="sheet_mine_row_desc_past">%1$s, %2$s, %3$s, tap to view</string>
+  <string name="sheet_mine_title">Me</string>
+  <string name="sheet_minutes_unit">min before</string>
+  <string name="sheet_none">None</string>
+  <string name="sheet_not_filled">Not set</string>
+  <string name="sheet_note">Note</string>
+  <string name="sheet_note_hint">Details to remember</string>
+  <string name="sheet_note_optional">Note (optional)</string>
+  <string name="sheet_odd_weeks">Odd weeks</string>
+  <string name="sheet_paste_clipboard">Paste from clipboard</string>
+  <string name="sheet_paste_input_desc">Timetable text input</string>
+  <string name="sheet_paste_input_hint">Paste your formatted timetable here</string>
+  <string name="sheet_paste_intro">One course per line, fields separated by | (Tab also works, handy when copying from a spreadsheet). Weeks, location and teacher are optional; empty weeks means every week.</string>
+  <string name="sheet_paste_rules" tools:ignore="TypographyDashes">Day: Mon–Sun, 周一~周日, 星期一 or 1–7\nPeriods: 1-2, 3, 第9-10节\nWeeks: 1-16周, 1-16周单周 (odd), 2-16周双周 (even), 1-8周,10-16周</string>
+  <string name="sheet_paste_title">Paste timetable text</string>
+  <string name="sheet_period_chip_desc">%1$s period %2$d</string>
+  <string name="sheet_period_chip_desc_time">%1$s period %2$d, %3$s</string>
+  <string name="sheet_period_end">End</string>
+  <string name="sheet_period_start">Start</string>
+  <string name="sheet_periods">Periods</string>
+  <string name="sheet_pick_date">Pick date…</string>
+  <string name="sheet_recognize">Read timetable</string>
+  <string name="sheet_remind_at_start">At start</string>
+  <string name="sheet_remind_hint">Reminders follow the master switch in Settings → Reminder notifications. Reminders whose time has passed aren\'t sent.</string>
+  <string name="sheet_remind_minutes">%1$d min</string>
+  <string name="sheet_remind_none">None</string>
+  <string name="sheet_reminder">Reminder</string>
+  <string name="sheet_reminder_expired_status">Reminder time passed (was: %1$s)</string>
+  <string name="sheet_reminder_passed_message">The reminder time has already passed and won\'t be sent later. Go back to change the time, or save this event with no reminder.</string>
+  <string name="sheet_reminder_passed_title">Reminder time has passed</string>
+  <string name="sheet_room_hint">Room / location</string>
+  <string name="sheet_save_changes">Save changes</string>
+  <string name="sheet_save_without_reminder">Save without reminder</string>
+  <string name="sheet_settings">Settings</string>
+  <string name="sheet_settings_sub">Import, reminders, periods, academic calendar and interface tone</string>
+  <string name="sheet_start_time">Start time</string>
+  <string name="sheet_start_time_hint">e.g. 10:00</string>
+  <string name="sheet_swatch_desc">%1$s, %2$s, tap to select</string>
+  <string name="sheet_swatch_desc_selected">%1$s, %2$s, selected</string>
+  <string name="sheet_teacher">Teacher</string>
+  <string name="sheet_temporary_chip">Temporary · from this week</string>
+  <string name="sheet_temporary_unavailable">This week isn\'t a teaching week in the academic calendar, so temporary weeks can\'t be set</string>
+  <string name="sheet_text_badge">TXT</string>
+  <string name="sheet_think_again">Not now</string>
+  <string name="sheet_time">Time</string>
+  <string name="sheet_time_unset">Time not set</string>
+  <string name="sheet_today">Today</string>
+  <string name="sheet_tomorrow">Tomorrow</string>
+  <string name="sheet_untitled_course">Untitled course</string>
+  <string name="sheet_untitled_event">Untitled event</string>
+  <string name="sheet_use_example">Use example</string>
+  <string name="sheet_week_unit">weeks</string>
+  <string name="sheet_weekday">Day</string>
+  <string name="sheet_weeks">Weeks</string>
+  <string name="sheet_weeks_all_chip">Weeks 1–%1$d</string>
+  <string name="sheet_weeks_hint" tools:ignore="TypographyDashes">e.g. 1-16周 or 1-16周单周 (odd); empty = every week</string>
+  <string name="sheet_your_timetable">Your timetable</string>
+</resources>

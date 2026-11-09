@@ -3,35 +3,34 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "local-env.ps1")
-$javaHome = Get-MeinJavaHome
-$androidHome = Get-MeinAndroidHome
+$javaHome = Get-WeekWeeksJavaHome
+$androidHome = Get-WeekWeeksAndroidHome
+$gradleUserHome = Get-WeekWeeksGradleUserHome
 $javac = Join-Path $javaHome "bin\javac.exe"
-$java = Join-Path $javaHome "bin\java.exe"
 $androidJar = Join-Path $androidHome "platforms\android-36.1\android.jar"
+$wrapper = Join-Path $root "gradlew.bat"
 
-foreach ($required in @($javac, $java, $androidJar)) {
+foreach ($required in @($javac, $androidJar, $wrapper)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required verification dependency is missing: $required"
     }
 }
 
-$logicOut = Join-Path $root "build\logic-test-classes"
+# Unit tests live in app/src/test (JUnit 4) and run through Gradle, the same as Android Studio.
+$env:JAVA_HOME = $javaHome
+$env:ANDROID_HOME = $androidHome
+$env:ANDROID_SDK_ROOT = $androidHome
+$env:GRADLE_USER_HOME = $gradleUserHome
+Push-Location $root
+try {
+    & $wrapper --no-daemon testDebugUnitTest
+    if ($LASTEXITCODE -ne 0) { throw "Unit tests failed with exit code: $LASTEXITCODE" }
+} finally {
+    Pop-Location
+}
+
 $androidOut = Join-Path $root "build\android-java-check"
-New-Item -ItemType Directory -Force -Path $logicOut, $androidOut | Out-Null
-
-& $javac -encoding UTF-8 -d $logicOut `
-    (Join-Path $root "app\src\main\java\com\example\meinstundenplan\TimetableRules.java") `
-    (Join-Path $root "app\src\main\java\com\example\meinstundenplan\ImportException.java") `
-    (Join-Path $root "app\src\main\java\com\example\meinstundenplan\PdfCourseParser.java") `
-    (Join-Path $root "tools\TimetableRulesTest.java") `
-    (Join-Path $root "tools\PdfCourseParserTest.java")
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-& $java -cp $logicOut com.example.meinstundenplan.TimetableRulesTest
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-& $java -cp $logicOut com.example.meinstundenplan.PdfCourseParserTest
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+New-Item -ItemType Directory -Force -Path $androidOut | Out-Null
 
 $sources = Get-ChildItem -LiteralPath (Join-Path $root "app\src\main\java") -Recurse -Filter *.java |
     Select-Object -ExpandProperty FullName

@@ -1,156 +1,122 @@
-# 我的课表 · Mein Stundenplan
+<div align="center">
 
-一个**完全离线**的原生 Android 课表应用：课程管理、学校 PDF 课表导入、校历周次计算、上课提醒与倒计时。
-纯 Java + Material 组件，无任何网络权限、无第三方 SDK、无广告与统计。
+# Week weeks
 
-> English: a fully offline native Android timetable app (Java, minSdk 23 / targetSdk 36).
-> Courses are stored encrypted with the Android Keystore; the app requests no `INTERNET` permission.
+**纯净，无广告。把注意力留给每一周。**
 
-- 当前版本：`1.2.2`（`versionCode 5`）
-- 运行环境：Android 6.0（API 23）及以上，针对 Android 16（API 36）构建
-- 版本历史：[docs/CHANGELOG.md](docs/CHANGELOG.md)
+一款离线运行的原生 Android 课表与日程应用。无需注册，不接入广告或统计追踪 SDK。
 
-## 功能特性
+**简体中文** · [繁體中文](<README.zh-TW.md>) · [English](<README.en.md>)
 
-**课程管理**
-- 周一至周日切换查看，打开应用自动定位当天
-- 添加、编辑、删除课程：开始/结束节次、上课周次、课程名称、地点、教师、颜色
-- 同一天、同节次、同周次自动阻止重复添加
-- 周切换浏览：查看任意教学周的课表，可一键回到"本周"
+![Week weeks：无广告、离线、无需账号](<docs/images/hero.svg>)
 
-**PDF 导入**
-- 从学校导出的文字版课表 PDF 批量导入课程名称、上课周、地点、教师与节次
-- 不申请读取外部存储权限，只通过系统文件选择器读取用户主动选中的文件
-- 单个 PDF 限制 5 MB，压缩流与课程数量均有上限，避免异常文件耗尽内存
+</div>
 
-**校历与提醒**
-- 手动设置开学日/散学日，总周数自动计算；周次、倒计时、提醒全部基于该校历
-- 课程状态统一区分：未到提醒窗口、课前提醒、进行中、已结束
-- 提醒支持后续周次续排、开机/升级后重排、通知与精确闹钟权限被拒时自动降级
+## 只做课表，不做打扰
 
-**界面**
-- 三态主题切换：⏺ 自动（跟随系统）／☀ 浅色／🌙 深色
-- 今天用紫色标记并带圆点指示器，选中日期蓝色高亮
-- 节次微章、卡片阴影与统一对齐的布局
+打开课表，是为了知道下一节课在哪里，而不是先看一条广告。
 
-## 隐私与安全
+- **无广告**：没有开屏广告、横幅广告或激励视频，不用为了查看课表等待广告结束。
+- **无需账号**：不需要手机号、邮箱或登录，设置校历后即可添加课程。
+- **离线可用**：应用不申请 `INTERNET` 权限；查课表、管理日程和本地提醒都不依赖网络。
+- **无统计追踪 SDK**：当前应用没有集成广告、用户分析或行为追踪 SDK。
+- **数据留在设备**：课程与日程保存在应用私有存储中，不提供云同步。
 
-- 课程数据使用 **Android Keystore + AES/GCM** 加密保存，不落明文 JSON
-- 旧版本明文数据首次运行会自动迁移到加密字段 `courses_encrypted_v2` 并删除旧字段
-- 密钥丢失、密文损坏或数据被篡改时**暂停保存**，避免用空数据覆盖原始密文
-- `android:allowBackup="false"`、`android:dataExtractionRules`、`android:usesCleartextTraffic="false"`
-- 应用不持有 `INTERNET` 权限，完全离线运行；没有外部存储读写权限
-- 课程名称、周次、地点、教师字段有长度限制，课程总数有上限，颜色只接受内置色板
+> “纯净”指当前版本无广告、无账号体系、无统计追踪，不代表零系统权限。通知和精确闹钟权限只用于本地提醒，是否授予由你决定。
 
-本仓库**不包含任何真实课表、校历或账号数据**。导入用的 PDF 属于个人/校方资料，请自行准备，
-也不要把他人的课表文件提交进仓库。
+## 看看 Week weeks
 
-## 环境要求
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/timetable.png" width="260" alt="Week weeks 周课表，展示虚构课程及柔和配色"><br><strong>一周课程，一眼看清</strong></td>
+    <td align="center"><img src="docs/images/agenda.png" width="260" alt="Week weeks 日程列表，展示虚构的课程与个人安排"><br><strong>课程之外，也有生活</strong></td>
+    <td align="center"><img src="docs/images/appearance.png" width="260" alt="Week weeks 界面色调选择器，展示 16 种配色"><br><strong>外观配色，由你决定</strong></td>
+  </tr>
+</table>
 
-| 组件 | 版本 |
+*图片来自独立演示安装，课程、地点及个人安排均为虚构示例，不包含用户的真实课表。截图语言不限制应用语言，应用支持简体中文、繁體中文和 English。*
+
+## 简单，但该有的都有
+
+### 课表：从这一节，到整个学期
+
+- 周视图与列表自由切换，支持周一至周日、单节和跨节课程。
+- 按教学周浏览，支持单周、双周与自定义上课周，一键返回本周。
+- 当前／下一节课程卡、上课与下课倒计时，以及已上完课程的淡化显示。
+- 自定义节次时间，默认提供 11 节；老师姓名可按需显示。
+- 点按课程看详情，长按编辑；长按空白课格添加课程，减少误触。
+
+### 日程：给生活留一点位置
+
+- 添加一次性的个人安排，支持日期、开始／结束时间、地点和备注。
+- 「日程」里按日期查看课程与个人安排，「我的」里集中管理个人日程。
+- 本地提醒支持预设或自定义提前时间；应用可在开机或升级后恢复排程。
+
+### 导入：少一点重复输入
+
+- 通过系统文件选择器导入文字型 PDF 课表，不申请广泛的存储读写权限。
+- 支持粘贴文本课表，先预览、确认，再保存。
+- PDF 解析对排版有要求，不是所有学校格式都能识别；不支持扫描件 OCR。
+- 文本导入语法目前使用中文星期／节次关键词，切换界面语言不会改变解析规则。
+
+### 外观：清爽，也可以很个人
+
+- 浅色、深色和跟随系统主题，16 种界面色调、42 种课程预设颜色。
+- 同名课程共享基础配色，也可按课程名称分组随机配色。
+- 系统字体或 OPPO Sans，应用字号可在 85%–125% 间调整。仓库不附带 OPPO Sans 字体文件（专有字体，约 21.7MB），需要时自行放入 `app/src/main/assets/fonts/oppo_sans.ttf`；缺失时该选项回退为系统字体，不影响其他功能。
+- 三种界面语言：简体中文、繁體中文、English；默认跟随系统。
+
+## 你的数据，你的设备
+
+| 项目 | 当前行为 |
 | --- | --- |
-| JDK | 17 及以上（可用 Android Studio 自带 JBR） |
-| Android Gradle Plugin | 8.13.0 |
-| Gradle | 9.2.0（仓库自带 Wrapper，无需手工安装） |
-| compileSdk / targetSdk | 36（`android-36.1`）／36 |
-| Build Tools | 36.1.0 |
+| 网络 | 不申请 `INTERNET` 权限，无应用内云同步 |
+| 账号 | 无注册、登录或手机号绑定 |
+| 广告与统计 | 不集成广告或统计追踪 SDK |
+| 课程、个人日程与提醒排程 | 使用 Android Keystore 支持的 AES/GCM 加密保存 |
+| 外观等设置 | 保存在应用私有偏好中；并非所有设置都加密 |
+| 系统备份 | 配置为禁用应用备份，不提供自动云恢复 |
+| 文件访问 | 仅通过系统选择器读取你主动选择的课表文件 |
 
-## 构建 Release APK
+**请保留原始课表文件。** 卸载应用或清除数据会失去本地资料；目前没有跨设备同步或完整备份／恢复功能。加密不等于可以恢复已删除的数据，也不是对已 root 或受控设备的绝对防护承诺。
 
-1. 设置环境变量（Windows PowerShell 示例；Linux/macOS 用 `export`）：
+提醒可能受到通知权限、精确闹钟权限和设备省电策略影响；精确闹钟不可用时会降级，不能保证每台设备都在同一时刻送达。系统文件提供方本身是否联网，由其自身行为决定。
+
+## 开始使用
+
+1. 使用 **Android 6.0（API 23）或以上**的设备，安装已签名的 APK。
+2. 首次打开，设置本学期的开学日与散学日。
+3. 手动添加课程，或使用 PDF／文本导入并确认预览结果。
+4. 如需提醒，再授予相应权限；外观与语言可在设置里调整。
+
+正式应用包名为 `com.weekweeks.app`。开发版与正式版均使用同一套最新界面，不再区分“原版／清新版”；内部 `pastel` 构建仅为兼容测试入口，不是另一个产品版本。不同包名的数据不自动迁移，更名前的旧应用也不会被自动卸载。
+
+当前源码版本为 **1.2.3**（`versionCode 6`）。本仓库不预设下载地址；若项目尚未发布 APK，可按下面的方式自行构建。
+
+## 从源码构建
+
+准备 **JDK 17**、Android SDK Platform **36.1** 和 Build Tools **36.1.0**。项目使用 Gradle Wrapper **9.2.0** 与 Android Gradle Plugin **8.13.0**。
 
 ```powershell
-$env:JAVA_HOME="<JDK 目录>"
+# Windows PowerShell：设置成本机实际路径
+$env:JAVA_HOME="<JDK 17 目录>"
 $env:ANDROID_HOME="<Android SDK 目录>"
-.\gradlew.bat --no-daemon assembleRelease
+.\gradlew.bat assembleDebug
+
+# 正式版与检查
+.\gradlew.bat assembleRelease lintRelease testDebugUnitTest testReleaseUnitTest
 ```
 
-2. 首次运行时 Wrapper 会按 `GRADLE_USER_HOME`（默认 `~/.gradle`）查找或下载 Gradle 9.2.0。
+macOS／Linux 使用 `./gradlew` 和相应的环境变量设置方式。开发版 APK 默认使用 debug 签名；正式版需要配置自己的发布签名。没有发布签名时会生成不可直接安装的 unsigned APK。构建过程可能需要联网下载工具与依赖，**应用运行本身不需要网络**。
 
-3. 产物位置：
+详细说明：[构建、签名与验证](<docs/BUILDING.md>) · [界面与交互](<docs/PASTEL-UI.md>) · [变更日志](<docs/CHANGELOG.md>)
 
-```text
-app/build/outputs/apk/release/app-release.apk
-```
+## 参与改进
 
-配置好签名凭据（见下文）时产出已签名 APK；未配置时产出 `app-release-unsigned.apk`，
-仅用于校验构建可用性，不能直接安装。也可以在 Android Studio 中用
-`Build > Generate Signed App Bundle / APK` 产出 `bundleRelease` 上架包。
+欢迎报告问题、提出建议或协助翻译。反馈导入问题时，请提供**脱敏或虚构样例**，不要提交真实学生信息、教师资料、个人日程、签名密钥或密码。
 
-用 Android Studio 打开也可以：`File > Open` 选择本目录，IDE 会生成 `local.properties`
-（记录你本机的 `sdk.dir`，该文件已被 `.gitignore` 忽略，不要提交）。
+图片素材说明与复现方法见 [图片说明](<docs/images/README.md>)。仓库中演示图片不作为真实个人数据样例。
 
-## 项目结构
+## 许可证状态
 
-```text
-.
-├── app/src/main/java/com/example/meinstundenplan/
-│   ├── MainActivity.java              界面编排与交互（课程列表、编辑弹窗、主题、倒计时）
-│   ├── TimetableRules.java            纯逻辑：周次/节次匹配、时间状态机（可独立单测）
-│   ├── PdfCourseParser.java           纯逻辑：PDF 词法解析与课程提取（可独立单测）
-│   ├── SecureStorage.java             Keystore + AES/GCM 加解密与密钥建立
-│   ├── ReminderScheduler.java         提醒调度（generation 代际号、闹钟降级、续排）
-│   ├── ClassReminderReceiver.java     提醒触发与通知
-│   ├── ReminderBootReceiver.java      开机/升级后重排
-│   └── ImportException.java           导入失败的受检异常
-├── app/src/main/res/                  图标、配色（浅色/深色）、字符串、数据提取规则
-├── gradle/wrapper/                    Gradle Wrapper
-├── tools/                             构建、校验、审计与打包脚本 + 离线编译桩
-├── docs/CHANGELOG.md                  变更与决策记录
-└── secrets/                           签名配置目录（仅提交 .template）
-```
-
-UI 目前由 Java 代码直接构建（无 XML 布局），资源目录只放图标、配色与字符串。
-
-## 校验脚本
-
-```powershell
-# 纯逻辑单测 + 用 android.jar 对全部 Java 源码做编译检查
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\verify-logic.ps1
-
-# clean + lintRelease + assembleRelease 一键构建（含 release 混淆与资源裁剪）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\build-verify.ps1
-
-# 静态安全审计：备份策略、明文流量、危险权限、Keystore 用法、输入边界、
-# 动态代码加载、命令执行、WebView JS 桥、反序列化、不安全 TLS 入口
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\security-audit.ps1
-```
-
-脚本不写死任何本机路径：JDK 取 `JAVA_HOME`，SDK 取 `ANDROID_HOME` 或 `local.properties`
-里的 `sdk.dir`，Gradle 缓存取 `GRADLE_USER_HOME`（默认 `~/.gradle`）。
-
-## 发布签名
-
-Release 签名凭据按以下顺序解析（见 `app/build.gradle`），**任何凭据都不进入版本库**：
-
-1. 环境变量（推荐 CI）：`MEIN_STORE_FILE`、`MEIN_STORE_PASSWORD`、`MEIN_KEY_ALIAS`、`MEIN_KEY_PASSWORD`
-2. 项目内 `secrets/release-signing.properties`（复制 `secrets/release-signing.properties.template` 后填写）
-3. 用户目录 `~/.gradle/mein-stundenplan-signing.properties`
-
-Release 构建已开启 `minifyEnabled` 与 `shrinkResources`：
-
-```powershell
-.\gradlew.bat --no-daemon assembleRelease
-```
-
-## 制作发行包
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\package-release.ps1
-```
-
-按 `versionName` 生成 `dist/mein-stundenplan-v<版本>/` 与同名 zip，仅包含可发布的源码、
-Gradle Wrapper、文档与脚本；keystore、密码、`local.properties`、构建产物、真实课表 PDF
-都会被主动拒绝打包。
-
-## 常见问题
-
-- **Wrapper 下载失败**：确认网络可达 `services.gradle.org`，或预先在 `GRADLE_USER_HOME\wrapper\dists` 放置 `gradle-9.2.0-bin.zip`。
-- **`JAVA_HOME is not set`**：指向 JDK 17+，Android Studio 自带 JBR 也可。
-- **找不到 `android-36.1`**：在 SDK Manager 中安装 SDK Platform 36（minor 1）与 Build-Tools 36.1.0。
-- **导入后课程为空**：确认 PDF 是文字版而非扫描件；当前解析器针对学校教务系统导出的 iText 文字版课表，其它排版需要调整 `PdfCourseParser`。
-
-## 许可
-
-本仓库当前按"保留所有权利"提供，尚未附带开源许可证。若你希望开放使用，请在根目录加入
-`LICENSE`（例如 Apache-2.0 或 MIT）后再对外声明。
+项目希望以开放源码的方式协作，但**当前仓库尚未附带开源许可证**。在维护者选定并加入许可证前，请不要将“源码可查看”理解为已经获得任意使用、修改或再分发的许可。第三方字体等素材仍须遵守各自条款。

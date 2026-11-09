@@ -3,9 +3,9 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "local-env.ps1")
-$javaHome = Get-MeinJavaHome
-$androidHome = Get-MeinAndroidHome
-$gradleUserHome = Get-MeinGradleUserHome
+$javaHome = Get-WeekWeeksJavaHome
+$androidHome = Get-WeekWeeksAndroidHome
+$gradleUserHome = Get-WeekWeeksGradleUserHome
 
 $wrapper = Join-Path $root "gradlew.bat"
 if (-not (Test-Path -LiteralPath $wrapper)) {

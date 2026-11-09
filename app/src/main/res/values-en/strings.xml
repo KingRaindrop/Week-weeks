@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">Week weeks</string>
+    <string name="import_pdf_cta">Import PDF timetable</string>
+    <string name="status_reminders_off">%1$s · Reminders off</string>
+    <string name="week_title_picker">%1$s ▾</string>
+    <string name="period_summary">Period %1$s</string>
+    <string name="period_summary_with_time">Period %1$s · %2$s–%3$s</string>
+    <string name="temporary_from_week">From week %1$d, on</string>
+    <string name="countdown_until_start">Starts in %1$s</string>
+    <string name="countdown_until_end">Ends in %1$s</string>
+    <string name="accent_palette_hint">16 calm tones · Changes the interface only, not course colors</string>
+    <string name="font_settings_summary">Current: %1$s · %2$d%%</string>
+    <string name="font_size_value">Text size: %1$d%%</string>
+    <string name="font_size_hint" formatted="false">85%–125% in 5% steps; 100% is the default and adds to the system text size. Applies everywhere after OK; Cancel discards.</string>
+    <string name="font_size_preview">Text size preview\nAdvanced Mathematics · Building A101\nClasses and plans, all in view.</string>
+
+    <string name="action_ok">OK</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_close">Close</string>
+    <string name="action_continue_editing">Keep editing</string>
+    <string name="action_discard_changes">Discard</string>
+
+    <string name="language_title">Language</string>
+    <string name="language_summary">Current: %1$s</string>
+    <string name="language_system">System default</string>
+    <string name="language_save_failed">Couldn\'t save the language setting. Check device storage.</string>
+</resources>

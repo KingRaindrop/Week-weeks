@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">Week weeks</string>
+    <string name="import_pdf_cta">匯入 PDF 課表</string>
+    <string name="status_reminders_off">%1$s · 提醒已關閉</string>
+    <string name="week_title_picker">%1$s ▾</string>
+    <string name="period_summary">第%1$s節</string>
+    <string name="period_summary_with_time">第%1$s節 · %2$s–%3$s</string>
+    <string name="temporary_from_week">從第 %1$d 週起，上</string>
+    <string name="countdown_until_start">距上課 %1$s</string>
+    <string name="countdown_until_end">距下課 %1$s</string>
+    <string name="accent_palette_hint">16 款舒適色調 · 僅改變介面，不改變課程配色</string>
+    <string name="font_settings_summary">目前：%1$s · %2$d%%</string>
+    <string name="font_size_value">字號：%1$d%%</string>
+    <string name="font_size_hint" formatted="false">85%–125%，每檔5%；100%為預設，疊加系統字號。確定後全域生效，取消不儲存。</string>
+    <string name="font_size_preview">字號預覽\n高等數學 · 教學樓 A101\n課程與個人安排，從容掌握。</string>
+
+    <string name="action_ok">確定</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_save">儲存</string>
+    <string name="action_delete">刪除</string>
+    <string name="action_close">關閉</string>
+    <string name="action_continue_editing">繼續編輯</string>
+    <string name="action_discard_changes">捨棄修改</string>
+
+    <string name="language_title">語言</string>
+    <string name="language_summary">目前：%1$s</string>
+    <string name="language_system">跟隨系統</string>
+    <string name="language_save_failed">語言設定儲存失敗，請檢查裝置儲存空間狀態</string>
+</resources>

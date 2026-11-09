@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+  <string-array name="main_course_color_names">
+    <item>Teal</item>
+    <item>Blue</item>
+    <item>Green</item>
+    <item>Purple</item>
+    <item>Terracotta</item>
+    <item>Ochre</item>
+    <item>Dark green</item>
+    <item>Blue gray</item>
+    <item>Rose</item>
+    <item>Olive</item>
+  </string-array>
+  <string-array name="main_days_short">
+    <item>Mon</item>
+    <item>Tue</item>
+    <item>Wed</item>
+    <item>Thu</item>
+    <item>Fri</item>
+    <item>Sat</item>
+    <item>Sun</item>
+  </string-array>
+  <plurals name="main_calendar_saved">
+    <item quantity="one">Academic calendar saved: %1$d week. Past courses kept.</item>
+    <item quantity="other">Academic calendar saved: %1$d weeks. Past courses kept.</item>
+  </plurals>
+  <plurals name="main_invalid_weeks">
+    <item quantity="one">%1$d course has unreadable weeks. Open it and fix them; it won\'t get reminders.</item>
+    <item quantity="other">%1$d courses have unreadable weeks. Open them and fix them; they won\'t get reminders.</item>
+  </plurals>
+  <plurals name="main_paste_lines_need_fix">
+    <item quantity="one">%1$d line needs fixing. Fix it and try again:\n%2$s</item>
+    <item quantity="other">%1$d lines need fixing. Fix them and try again:\n%2$s</item>
+  </plurals>
+  <plurals name="main_randomized_count">
+    <item quantity="one">Recolored %1$d course</item>
+    <item quantity="other">Recolored %1$d courses</item>
+  </plurals>
+  <plurals name="main_summary_courses">
+    <item quantity="one">%1$s%2$s · %3$d course</item>
+    <item quantity="other">%1$s%2$s · %3$d courses</item>
+  </plurals>
+  <string name="main_accent_summary">Choose the main tone for the whole app</string>
+  <string name="main_accent_title">Interface tone</string>
+  <string name="main_add_course">Add course</string>
+  <string name="main_add_course_cta">＋ Add course</string>
+  <string name="main_add_period_rule">Add period</string>
+  <string name="main_add_personal_event">Add personal event</string>
+  <string name="main_add_term_course">Add term course</string>
+  <string name="main_added_to_timetable">Added to timetable</string>
+  <string name="main_allow_notifications_first">Allow notifications first</string>
+  <string name="main_app_notifications_off">Notifications for this app are off in system settings. Turn them on first.</string>
+  <string name="main_back_to_this_week">Back to this week</string>
+  <string name="main_break_prefix">"Break · "</string>
+  <string name="main_calendar_manual_name">Calendar set manually</string>
+  <string name="main_calendar_message">Total weeks are calculated from the term start and term end.</string>
+  <string name="main_calendar_save_failed">Couldn\'t save the academic calendar. Check device storage.</string>
+  <string name="main_calendar_settings">Academic calendar</string>
+  <string name="main_calendar_settings_summary">Set term start and term end</string>
+  <string name="main_changes_saved">Changes saved</string>
+  <string name="main_choose_week">Choose week</string>
+  <string name="main_class_over">Finished</string>
+  <string name="main_config_deleted">Current setup deleted</string>
+  <string name="main_confirm_import">Import</string>
+  <string name="main_conflict_with">"Conflicts with \"%1$s\": "</string>
+  <string name="main_countdown_end_prefix">"Class ends in "</string>
+  <string name="main_countdown_end_under_minute">Class ends in under 1 min</string>
+  <string name="main_countdown_end_unknown">Class ends in —</string>
+  <string name="main_countdown_h">%1$s%2$d h</string>
+  <string name="main_countdown_hm">%1$s%2$d h %3$d min</string>
+  <string name="main_countdown_m">%1$s%2$d min</string>
+  <string name="main_countdown_prefix_minutes">"%1$s%2$d min "</string>
+  <string name="main_countdown_seconds_suffix">" s"</string>
+  <string name="main_countdown_start_prefix">"Class starts in "</string>
+  <string name="main_course_deleted">Course deleted</string>
+  <string name="main_course_gone">This course no longer exists, so editing can\'t be restored.</string>
+  <string name="main_course_limit">Course limit reached</string>
+  <string name="main_course_name_required">Course name can\'t be empty</string>
+  <string name="main_courses_corrupt">Timetable data is malformed; damaged content was ignored</string>
+  <string name="main_courses_decrypt_failed">Couldn\'t decrypt timetable data; overwriting is blocked</string>
+  <string name="main_courses_encrypt_failed">Couldn\'t encrypt and save the timetable</string>
+  <string name="main_courses_write_failed">Couldn\'t write the timetable. Check device storage.</string>
+  <string name="main_date_format">Use the date format YYYY-MM-DD</string>
+  <string name="main_date_pattern_month_day">MMM d</string>
+  <string name="main_delete_config">Delete current setup</string>
+  <string name="main_delete_config_failed">Couldn\'t delete the setup. Your courses and reminders are kept. Check device storage.</string>
+  <string name="main_delete_config_message">This deletes saved courses, academic calendar settings and the reminder schedule. Light/dark mode and My events are kept.</string>
+  <string name="main_delete_config_summary">Delete courses, calendar and reminder schedule</string>
+  <string name="main_delete_course_message">This deletes every entry of \"%1$s\" (all its weeks). This can\'t be undone.</string>
+  <string name="main_delete_course_title">Delete course?</string>
+  <string name="main_edit_course">Edit course</string>
+  <string name="main_end_after_start">End time must be after start time</string>
+  <string name="main_end_before_start">Term end can\'t be before term start</string>
+  <string name="main_enter_course_name">Enter a course name</string>
+  <string name="main_event">Event</string>
+  <string name="main_event_added">Event added</string>
+  <string name="main_event_deleted">Event deleted</string>
+  <string name="main_event_deleted_already">This event was deleted</string>
+  <string name="main_event_gone">This event no longer exists, so editing can\'t be restored.</string>
+  <string name="main_event_limit">Event limit reached (%1$d)</string>
+  <string name="main_event_saved">Event saved</string>
+  <string name="main_events_locked_edit">Can\'t read event data; editing isn\'t available</string>
+  <string name="main_events_locked_save">Can\'t read event data; saving is blocked</string>
+  <string name="main_events_save_failed">Couldn\'t save events. Check device storage.</string>
+  <string name="main_events_unreadable">Can\'t read event data; overwriting is blocked</string>
+  <string name="main_feature_next_day">Next · %1$s</string>
+  <string name="main_feature_now">In class</string>
+  <string name="main_feature_plan">Study plan</string>
+  <string name="main_feature_preview">Preview</string>
+  <string name="main_font_save_failed">Couldn\'t save font settings. Check device storage.</string>
+  <string name="main_font_title">Interface font</string>
+  <string name="main_got_it">Got it</string>
+  <string name="main_hint_course_name">Course name</string>
+  <string name="main_hint_room">Room / location</string>
+  <string name="main_hint_weeks" tools:ignore="TypographyDashes">e.g. 1-6周,9-17周,1-16周单周</string>
+  <string name="main_import_error">Import error: %1$s</string>
+  <string name="main_import_pdf">Import PDF timetable</string>
+  <string name="main_import_pdf_summary">Read courses, weeks and rooms from a file</string>
+  <string name="main_import_result_imported">Imported %1$d</string>
+  <string name="main_import_result_skipped">, skipped %1$d</string>
+  <string name="main_import_result_title">Recognized courses</string>
+  <string name="main_import_result_updated">, updated %1$d</string>
+  <string name="main_label_color">Color</string>
+  <string name="main_label_course">Course</string>
+  <string name="main_label_day">Day</string>
+  <string name="main_label_end_period">End period</string>
+  <string name="main_label_end_time">End time</string>
+  <string name="main_label_room">Location</string>
+  <string name="main_label_start_period">Start period</string>
+  <string name="main_label_start_time">Start time</string>
+  <string name="main_label_teacher">Teacher</string>
+  <string name="main_label_term_end">Term end</string>
+  <string name="main_label_term_start">Term start (its Mon–Sun is week 1)</string>
+  <string name="main_label_weeks">Weeks</string>
+  <string name="main_locked_cannot_import">Encrypted data is locked; import isn\'t available yet</string>
+  <string name="main_locked_cannot_save">Encrypted data is locked; changes can\'t be saved yet</string>
+  <string name="main_locked_refuse_save">Encrypted data is locked; overwrite refused</string>
+  <string name="main_max_periods" tools:ignore="PluralsCandidate">At most %1$d periods</string>
+  <string name="main_min_one_period">Keep at least 1 period</string>
+  <string name="main_more_errors" tools:ignore="PluralsCandidate">… and %1$d more</string>
+  <string name="main_need_more_periods_message" tools:ignore="PluralsCandidate">Found %2$d course entries in %1$s, including period %3$d, but only %4$d periods are set up. To avoid losing late classes or getting wrong reminder times, nothing was imported.\n\nIn period settings, add at least %3$d periods with your school\'s real times, then import again.</string>
+  <string name="main_need_more_periods_title">Add more period times first</string>
+  <string name="main_next_class">Next class</string>
+  <string name="main_next_week">Next week</string>
+  <string name="main_no_class_dates">The chosen day and weeks have no class dates in this academic calendar. Adjust the weeks or the calendar.</string>
+  <string name="main_no_courses">No courses</string>
+  <string name="main_no_courses_found">No courses found in %1$s</string>
+  <string name="main_no_courses_to_color">No courses to color. Add or import a timetable first.</string>
+  <string name="main_no_upcoming">No more classes</string>
+  <string name="main_not_now">Not now</string>
+  <string name="main_not_started_prefix">"Before term · "</string>
+  <string name="main_notification_permission_denied">Notifications not allowed; class reminders won\'t appear.</string>
+  <string name="main_notification_status">Notification status</string>
+  <string name="main_outside_term">Outside the term</string>
+  <string name="main_outside_term_message">Courses follow the teaching weeks of the academic calendar and won\'t appear on this date. Add a personal event for one-off plans. If you edit the term timetable, you\'ll jump to a teaching week with classes after saving.</string>
+  <string name="main_outside_term_title">This date is outside the term</string>
+  <string name="main_parsing_pdf">Reading PDF timetable…</string>
+  <string name="main_paste_import">Paste timetable text</string>
+  <string name="main_paste_import_summary">If the PDF can\'t be read, paste text in the sample format</string>
+  <string name="main_pasted_text_source">the pasted text</string>
+  <string name="main_pastel_msg_default">See the event list for courses and personal plans</string>
+  <string name="main_pastel_msg_outside">Outside the term · View and add personal events</string>
+  <string name="main_pastel_msg_preview">Viewing another week; edits change the real timetable</string>
+  <string name="main_pdf_import_failed">PDF import failed: %1$s</string>
+  <string name="main_pdf_permission_lost">PDF access expired. Choose the file again.</string>
+  <string name="main_pdf_too_large">PDF is over 5 MB; import refused</string>
+  <string name="main_pdf_unreadable">Can\'t read the PDF file</string>
+  <string name="main_period_badge_label">Per.</string>
+  <string name="main_period_delete_blocked">This or a later period has courses, and deleting it would shift their times. Only unused periods at the end can be deleted.</string>
+  <string name="main_period_format_invalid" tools:ignore="PluralsCandidate">Period %1$d has an invalid format</string>
+  <string name="main_period_in_use">A course uses period %1$d, so there can\'t be fewer periods</string>
+  <string name="main_period_n">Period %1$d</string>
+  <string name="main_period_rules_hint">Each rule is one period of the day, earliest first</string>
+  <string name="main_period_save_failed">Couldn\'t save periods. Check device storage.</string>
+  <string name="main_period_saved">Periods saved</string>
+  <string name="main_period_settings">Period times</string>
+  <string name="main_period_settings_summary">Set times for periods 1 to N</string>
+  <string name="main_period_time_invalid" tools:ignore="PluralsCandidate">Period %1$d has invalid times</string>
+  <string name="main_period_with_time">Period %1$d · %2$s</string>
+  <string name="main_periods_order">Periods must run from earliest to latest without overlapping</string>
+  <string name="main_pick_date_title">Pick a date to view its week</string>
+  <string name="main_popup_location">Location: %1$s</string>
+  <string name="main_popup_time">Time: %1$s</string>
+  <string name="main_precision_exact">exact</string>
+  <string name="main_precision_inexact">may be delayed by battery saving</string>
+  <string name="main_prev_week">Previous week</string>
+  <string name="main_preview_chip">Preview · Tap for this week</string>
+  <string name="main_preview_courses">[Preview]</string>
+  <string name="main_preview_days">[By day]</string>
+  <string name="main_preview_item">"%1$d. %2$s\n   %3$s Periods %4$d–%5$d %6$s\n"</string>
+  <string name="main_preview_more" tools:ignore="PluralsCandidate">… and %1$d more</string>
+  <string name="main_preview_parsed">Courses parsed: %1$d</string>
+  <string name="main_preview_per_day">"%1$s: %2$d  "</string>
+  <string name="main_preview_per_period">"P%1$d: %2$d×  "</string>
+  <string name="main_preview_periods">[By period]</string>
+  <string name="main_preview_stats">[Summary]</string>
+  <string name="main_randomize_button">Randomize</string>
+  <string name="main_randomize_colors">Random colors</string>
+  <string name="main_randomize_colors_summary">Bright presets first; same-name courses share a color</string>
+  <string formatted="false" name="main_randomize_message">Reassigns colors for every course in the current timetable, replacing manual picks. Courses with the same name share a color. 12 curated colors are used without repeats per round and cycle after 12 courses; manual picking still offers 42 colors. Finished courses keep their color in light mode, faded to 30% background opacity with clear text; dark mode applies a light fade. Course times and other details don\'t change.</string>
+  <string name="main_reminders">Reminders</string>
+  <string name="main_reminders_off_desc">%1$s, reminders off, tap to turn on</string>
+  <string name="main_reminders_off_message">Reminders are turned off, so no reminders will be sent for courses or personal events.</string>
+  <string name="main_reminders_off_title">Reminders are off</string>
+  <string name="main_reminders_on_toast">Reminders on</string>
+  <string name="main_reminders_summary">Reminders for courses and personal events</string>
+  <string name="main_reset_font_size">Reset text size</string>
+  <string name="main_reset_periods">Reset to periods 1–%1$d</string>
+  <string name="main_save_failed_retry">Couldn\'t save. Try again later.</string>
+  <string name="main_section_appearance">Appearance</string>
+  <string name="main_section_data">Data</string>
+  <string name="main_section_time">Time</string>
+  <string name="main_section_timetable">Timetable</string>
+  <string name="main_selected_short_suffix">, selected</string>
+  <string name="main_selected_suffix">, selected</string>
+  <string name="main_serialize_failed">Couldn\'t serialize the timetable</string>
+  <string name="main_set_periods">Set periods</string>
+  <string name="main_settings">Settings</string>
+  <string name="main_shake_stop_desc">%1$s, double-tap to stop shaking</string>
+  <string name="main_shake_stopped">Stopped shaking for this class</string>
+  <string name="main_show_teacher">Show teacher names</string>
+  <string name="main_show_teacher_summary">Shown in week view and lists; always in details</string>
+  <string name="main_skip_exists">%1$s: already exists</string>
+  <string name="main_skip_limit">%1$s: limit reached</string>
+  <string name="main_skip_reasons">Skipped because:\n%1$s</string>
+  <string name="main_starting_soon">Starting soon</string>
+  <string name="main_state_off">off</string>
+  <string name="main_state_on">on</string>
+  <string name="main_status_blocked">Turned off by the system. Tap to restore.</string>
+  <string name="main_status_channel_off">Reminder channel is off. Tap to restore.</string>
+  <string name="main_status_next">Next: %1$s%2$s %3$s</string>
+  <string name="main_status_none_pending">Ready; no reminders pending</string>
+  <string name="main_status_not_granted">Not allowed. Tap to open system settings.</string>
+  <string name="main_status_now">Now: %1$s %2$s</string>
+  <string name="main_status_reminders_off">Reminders are off; no notifications will be sent. Tap to turn on.</string>
+  <string name="main_status_scheduled" tools:ignore="PluralsCandidate">Ready; %1$d scheduled, next %2$s (%3$s)</string>
+  <string name="main_status_service_unavailable">System notification service unavailable</string>
+  <string name="main_status_submit_failed">Reminders saved, but system alarms failed. Tap to check settings.</string>
+  <string name="main_storage_locked_warning">⚠️ Encrypted timetable can\'t be read\n\nSaving is paused to protect your data.\nCheck the system keystore or clear app data to start over.</string>
+  <string name="main_switch_to_dark">Switch to dark mode</string>
+  <string name="main_switch_to_light">Switch to light mode</string>
+  <string name="main_tap_to_select_suffix">, tap to select</string>
+  <string name="main_temp_weeks_message">Starts in the current week (%1$d) and runs for N weeks.</string>
+  <string name="main_temp_weeks_outside">Not in a teaching week; temporary weeks can\'t be set</string>
+  <string name="main_temp_weeks_title">Temporary course weeks</string>
+  <string name="main_temporary_weeks_button">Temporary course: N weeks from this week</string>
+  <string name="main_test_course_name">Dynamic Island test</string>
+  <string name="main_test_course_room">Current period</string>
+  <string name="main_test_course_teacher">Not saved</string>
+  <string name="main_test_course_weeks">Temporary test</string>
+  <string name="main_test_reminder">Test class reminder</string>
+  <string name="main_test_reminder_course">Reminder test</string>
+  <string name="main_test_reminder_room">Emulator test</string>
+  <string name="main_test_reminder_summary">Show a reminder now (debug build)</string>
+  <string name="main_test_send_failed">Couldn\'t send the test notification. Check notification settings.</string>
+  <string name="main_test_sent">Test notification sent</string>
+  <string name="main_this_week">This week</string>
+  <string name="main_this_week_prefix">"This week · "</string>
+  <string name="main_this_week_suffix">, this week</string>
+  <string name="main_time_format">Use HH:mm, e.g. 08:00</string>
+  <string name="main_time_not_set">Time not set</string>
+  <string name="main_title">@string/app_name</string>
+  <string name="main_title_subtitle_desc">%1$s, %2$s</string>
+  <string name="main_today">Today</string>
+  <string name="main_today_suffix">, today</string>
+  <string name="main_toggle_desc">%1$s, %2$s, tap to toggle</string>
+  <string name="main_turn_on_reminders">Turn on</string>
+  <string name="main_week_n">Week %1$d</string>
+  <string name="main_week_prefix">"Week %1$d · "</string>
+  <string name="main_week_range">Week %1$d · %2$s–%3$s</string>
+  <string name="main_weeks_positive">Weeks must be greater than 0</string>
+  <string name="main_weeks_truncated">Cut off at the term\'s last week: %1$s</string>
+  <string name="main_welcome_calendar_message">Course weeks, countdowns and reminders depend on the academic calendar. Enter this term\'s start and end dates.</string>
+  <string name="main_welcome_calendar_title">Welcome! Set up your academic calendar first</string>
+</resources>

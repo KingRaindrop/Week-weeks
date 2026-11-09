@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MeinStundenplan"
+rootProject.name = "WeekWeeks"
 include ":app"

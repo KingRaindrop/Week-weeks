@@ -25,7 +25,7 @@ if (-not $Version) {
     $Version = $versionLine.Matches[0].Groups[1].Value
 }
 
-$stagingName = "mein-stundenplan-v$Version"
+$stagingName = "week-weeks-v$Version"
 $distDir = Join-Path $root $OutDir
 $staging = Join-Path $distDir $stagingName
 
@@ -48,6 +48,8 @@ $files = @(
     ".gitignore",
     ".gitattributes",
     "README.md",
+    "README.en.md",
+    "README.zh-TW.md",
     "build.gradle",
     "settings.gradle",
     "gradle.properties",
@@ -56,21 +58,23 @@ $files = @(
     "app\build.gradle",
     "app\proguard-rules.pro",
     "docs\CHANGELOG.md",
+    "docs\BUILDING.md",
+    "docs\PASTEL-UI.md",
     "secrets\release-signing.properties.template",
     "tools\build-verify.ps1",
     "tools\verify-logic.ps1",
+    "tools\verify-reminders.ps1",
     "tools\security-audit.ps1",
     "tools\local-env.ps1",
-    "tools\package-release.ps1",
-    "tools\TimetableRulesTest.java",
-    "tools\PdfCourseParserTest.java"
+    "tools\package-release.ps1"
 )
 
 # Directories copied recursively (source tree, wrapper, offline compile stubs).
 $treeDirs = @(
     "app\src",
     "gradle\wrapper",
-    "tools\compile-stubs"
+    "tools\compile-stubs",
+    "docs\images"
 )
 
 foreach ($file in $files) {
