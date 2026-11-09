@@ -36,4 +36,4 @@ Build an isolated `.readme` variant, add only fictional data, capture the actual
 
 ## 素材与授权 / Asset and licensing notes
 
-The banner is original artwork created for this repository. Screenshots show the app running with fictional data. No third-party stock photos, remote image services or externally hosted badges are used. These notes do not grant a separate license: repository licensing is still pending, and any third-party fonts or components remain subject to their respective terms.
+The banner is original artwork created for this repository. Screenshots show the app running with fictional data. No third-party stock photos, remote image services or externally hosted badges are used. These notes do not grant a separate license: the banner and screenshots are part of this repository and are covered by the [PolyForm Noncommercial License 1.0.0](<../../LICENSE>), while any third-party fonts or components remain subject to their respective terms.

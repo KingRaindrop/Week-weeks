@@ -8,6 +8,8 @@ A native Android timetable and agenda app that works offline. No registration, a
 
 [简体中文](<README.md>) · [繁體中文](<README.zh-TW.md>) · **English**
 
+[PolyForm Noncommercial 1.0.0](<LICENSE>) · Modifications allowed, commercial use not
+
 ![Week weeks: ad-free, offline, and no account required](<docs/images/hero.svg>)
 
 </div>
@@ -117,6 +119,24 @@ Bug reports, suggestions, and translation contributions are welcome. When report
 
 See [Image notes](<docs/images/README.md>) for image sources and reproduction steps. Demo images in this repository are not examples of real personal data.
 
-## License status
+## License
 
-The project aims to collaborate openly around its source code, but **this repository does not currently include an open-source license**. Until the maintainer selects and adds one, do not interpret source visibility as permission to use, modify, or redistribute it without restriction. Third-party assets, including fonts, remain subject to their own terms.
+This project is licensed under the **[PolyForm Noncommercial License 1.0.0](<LICENSE>)** (SPDX: `PolyForm-Noncommercial-1.0.0`). The [LICENSE](<LICENSE>) file in the repository root is authoritative; the summary below is a reading aid, not a substitute.
+
+**You may**
+- Download, install and use it for personal study, research, experiments and hobby projects.
+- Modify the source, build on it, and distribute your own modified versions.
+- Use it for noncommercial purposes, including at schools, charities, public research organizations and government institutions.
+
+**You may not**
+- Use the software or a derivative for commercial purposes, including selling it, charging for distribution, bundling it into a paid product or service, or making it part of a commercial offering.
+- Suggest that the author endorses you or your use.
+- Remove or work around the license or the `Required Notice:` line.
+
+**When you distribute**: whether or not you changed anything, anyone who receives the software or a derivative from you must also receive these terms (or a link to them) and the `Required Notice:` line. In practice that keeps derivative distributions under the same noncommercial terms.
+
+**This is not an OSI-approved open-source license.** Because commercial use is prohibited, the project is source-available rather than open source. GitHub may report the license as `Other`.
+
+**Third-party components are not covered by this license** and keep their own terms: AndroidX / Material Components (Apache-2.0), the Gradle Wrapper (Apache-2.0), and so on. The OPPO Sans font is not distributed here. Any future third-party asset follows that asset's own license.
+
+**Contributions**: by submitting code or documentation to this repository you agree that your contribution is licensed under these terms, and you confirm you have the right to do so.

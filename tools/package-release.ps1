@@ -47,6 +47,7 @@ if (Test-Path -LiteralPath $gitBackup) {
 $files = @(
     ".gitignore",
     ".gitattributes",
+    "LICENSE",
     "README.md",
     "README.en.md",
     "README.zh-TW.md",

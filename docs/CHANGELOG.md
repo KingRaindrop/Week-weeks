@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-11-09 · 采用 PolyForm Noncommercial 1.0.0 许可证（工作区改动，未提交）
+
+- 新增根目录 `LICENSE`，全文采用 PolyForm Noncommercial License 1.0.0，并加入 `Required Notice:` 版权行。
+- 该许可证允许修改与二次开发，禁止商业使用；再分发时必须随附许可证与 `Required Notice:` 行，衍生版本因此保持同样的非商业条款。
+- 三语首页的许可证章节改为具体权利／义务说明，并说明本项目属于“源码公开（source-available）”，不是 OSI 认证的开源许可，GitHub 可能识别为 `Other`。
+- 说明 AndroidX／Material Components（Apache-2.0）、Gradle Wrapper（Apache-2.0）等第三方组件仍遵循各自条款，OPPO Sans 字体不随仓库分发。
+- 补充贡献条款：提交即同意按本许可证授权。许可证文件已加入源码发行清单；未执行打包。
+
 ## 2026-11-09 · 多语言产品 README（工作区改动，未提交）
 
 - 首页重写为简体中文产品介绍，并新增繁體中文、English 对等版本，提供语言切换链接。
