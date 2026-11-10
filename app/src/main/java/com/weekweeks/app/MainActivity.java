@@ -4490,8 +4490,10 @@ public class MainActivity extends AppCompatActivity {
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(4), dp(8), dp(4), 0);
 
-        EditText startInput = input("YYYY-MM-DD", firstRun ? "" : formatDate(calendarStartMillis()));
-        EditText endInput = input("YYYY-MM-DD", firstRun ? "" : formatDate(calendarEndMillis()));
+        EditText startInput = calendarDateInput(firstRun ? "" : formatDate(calendarStartMillis()),
+                calendarStartMillis());
+        EditText endInput = calendarDateInput(firstRun ? "" : formatDate(calendarEndMillis()),
+                calendarEndMillis());
         form.addView(label(getString(R.string.main_label_term_start)));
         form.addView(startInput, fieldParams());
         form.addView(label(getString(R.string.main_label_term_end)));
@@ -4528,6 +4530,39 @@ public class MainActivity extends AppCompatActivity {
         });
         dialog.show();
         styleDialogWindow(dialog);
+    }
+
+    /** Read-only date field: choosing a date uses the same system calendar as the event editor. */
+    private EditText calendarDateInput(String selectedDate, long fallbackMillis) {
+        EditText field = input(getString(R.string.sheet_pick_date), selectedDate);
+        field.setKeyListener(null);
+        field.setFocusable(false);
+        field.setCursorVisible(false);
+        field.setOnClickListener(v -> {
+            Long selected = parseDateMillis(field.getText().toString());
+            Calendar initial = Calendar.getInstance();
+            initial.setTimeInMillis(selected != null ? selected : fallbackMillis);
+            Calendar min = Calendar.getInstance();
+            min.clear();
+            min.set(2000, Calendar.JANUARY, 1);
+            Calendar max = Calendar.getInstance();
+            max.clear();
+            max.set(2100, Calendar.DECEMBER, 31);
+            initial.setTimeInMillis(Math.max(min.getTimeInMillis(),
+                    Math.min(max.getTimeInMillis(), initial.getTimeInMillis())));
+            android.app.DatePickerDialog picker = new android.app.DatePickerDialog(this,
+                    (view, year, month, day) -> {
+                        Calendar chosen = Calendar.getInstance();
+                        chosen.clear();
+                        chosen.set(year, month, day);
+                        field.setText(formatDate(chosen.getTimeInMillis()));
+                    }, initial.get(Calendar.YEAR), initial.get(Calendar.MONTH), initial.get(Calendar.DAY_OF_MONTH));
+            picker.getDatePicker().setMinDate(min.getTimeInMillis());
+            picker.getDatePicker().setMaxDate(max.getTimeInMillis());
+            picker.show();
+            AppFonts.install(picker);
+        });
+        return field;
     }
 
     private void saveAcademicCalendar(String name, long startMillis, long endMillis) {
@@ -5681,6 +5716,7 @@ public class MainActivity extends AppCompatActivity {
                 e.title = o.optString("title", "").trim();
                 e.location = o.optString("location", "").trim();
                 e.note = o.optString("note", "").trim();
+                e.showInTimetable = o.optBoolean("showInTimetable", true);
                 if (e.id != 0L && e.validate() == null) {
                     personalEvents.add(e);
                 }
@@ -5708,6 +5744,7 @@ public class MainActivity extends AppCompatActivity {
                 o.put("title", e.title);
                 o.put("location", e.location);
                 o.put("note", e.note);
+                o.put("showInTimetable", e.showInTimetable);
                 array.put(o);
             }
             String encrypted = secureStorage.encrypt(array.toString());
@@ -5753,6 +5790,7 @@ public class MainActivity extends AppCompatActivity {
         }
         List<PastelTimetableView.EventEntry> visible = new ArrayList<>();
         for (PersonalEvent e : personalEvents) {
+            if (!e.showInTimetable) continue;
             long date = e.dayMillis();
             for (int day = 0; day < 7; day++) {
                 if (dates[day] == date) {
@@ -5864,7 +5902,7 @@ public class MainActivity extends AppCompatActivity {
             String error = savePersonalEvents(next);
             if (error == null) {
                 Toast.makeText(this, editing == null ? getString(R.string.main_event_added) : getString(R.string.main_event_saved), Toast.LENGTH_SHORT).show();
-                if (pastelTimetable != null && !eventFromMine) {
+                if (pastelTimetable != null && !eventFromMine && candidate.showInTimetable) {
                     pastelTimetable.showAgenda();
                     browsePastelDate(candidate.dayMillis());
                 }

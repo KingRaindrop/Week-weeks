@@ -11,7 +11,7 @@
     </string-array>
     <string name="view_hint">点按课程查看详情，长按编辑；长按空白格添加课程</string>
     <string name="view_empty_default">还没有课程，长按空白格添加</string>
-    <string name="view_title">课表</string>
+    <string name="view_title">日程表</string>
     <string name="view_import_timetable">导入课表</string>
     <string name="view_switch_light">切换到亮色模式</string>
     <string name="view_switch_dark">切换到暗色模式</string>

@@ -118,6 +118,28 @@ public class PersonalEventTest {
     }
 
     @Test
+    public void eventsDefaultToVisibleAndCopiesRetainVisibility() {
+        PersonalEvent event = library();
+        assertTrue(event.showInTimetable);
+        assertTrue(event.copy().showInTimetable);
+        event.showInTimetable = false;
+        assertFalse(event.copy().showInTimetable);
+        assertNull(event.copy().validate());
+    }
+
+    @Test
+    public void hidingEventDoesNotDisableReminderOrChangeItsDate() {
+        PersonalEvent event = library();
+        event.remindMinutes = 10;
+        long trigger = event.triggerAtMillis();
+        long day = event.dayMillis();
+        event.showInTimetable = false;
+        assertEquals(trigger, event.triggerAtMillis());
+        assertEquals(day, event.dayMillis());
+        assertEquals(10, event.copy().remindMinutes);
+    }
+
+    @Test
     public void labels() {
         assertEquals("10:00", library().timeLabel());
         assertEquals("不提醒", PersonalEvent.remindLabel(-1));

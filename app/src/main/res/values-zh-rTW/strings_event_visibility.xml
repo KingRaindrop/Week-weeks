@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="event_show_in_timetable">顯示在日程表</string>
+    <string name="event_show_in_timetable_hint">關閉後仍可在「我的」中檢視和編輯，提醒不受影響。</string>
+</resources>

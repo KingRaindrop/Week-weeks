@@ -25,6 +25,8 @@ final class PersonalEvent {
     int endMinutes = NO_END;
     int remindMinutes = NO_REMINDER;
     String title = "", location = "", note = "";
+    /** Display only; hidden events remain in My events and keep their reminders. */
+    boolean showInTimetable = true;
 
     private static final Pattern TIME = Pattern.compile(
             "^(\\d{1,2})(?:\\s*(?:[:：.点时])\\s*(\\d{1,2})?\\s*分?)?$");
@@ -35,6 +37,7 @@ final class PersonalEvent {
         e.id = id; e.year = year; e.month = month; e.day = day;
         e.startMinutes = startMinutes; e.endMinutes = endMinutes; e.remindMinutes = remindMinutes;
         e.title = title; e.location = location; e.note = note;
+        e.showInTimetable = showInTimetable;
         return e;
     }
 

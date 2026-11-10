@@ -780,6 +780,7 @@ final class PastelCourseSheet {
         state.putInt("month", activeEventDraft.month);
         state.putInt("day", activeEventDraft.day);
         state.putInt("remind", activeEventDraft.remindMinutes);
+        state.putBoolean("showInTimetable", activeEventDraft.showInTimetable);
         state.putBoolean("custom", activeCustomReminder[0]);
         state.putString("initial", activeEventInitial);
         for (int i = 0; i < activeEventInputs.length; i++) {
@@ -893,6 +894,7 @@ final class PastelCourseSheet {
             draft.month = restoredState.getInt("month", draft.month);
             draft.day = restoredState.getInt("day", draft.day);
             draft.remindMinutes = restoredState.getInt("remind", draft.remindMinutes);
+            draft.showInTimetable = restoredState.getBoolean("showInTimetable", draft.showInTimetable);
         }
         final EditText[] inputs = new EditText[6]; // title, start, end, location, note, custom minutes
         boolean presetReminder = false;
@@ -1021,6 +1023,19 @@ final class PastelCourseSheet {
         inputs[4].setGravity(Gravity.TOP | Gravity.START);
         inputs[4].setFilters(new InputFilter[]{new InputFilter.LengthFilter(PersonalEvent.MAX_NOTE)});
         form.addView(inputs[4], fieldParams());
+
+        com.google.android.material.switchmaterial.SwitchMaterial showInTimetable =
+                new com.google.android.material.switchmaterial.SwitchMaterial(context);
+        showInTimetable.setText(s(R.string.event_show_in_timetable));
+        showInTimetable.setTextColor(ink);
+        showInTimetable.setTextSize(14);
+        showInTimetable.setPadding(dp(2), dp(12), 0, dp(8));
+        showInTimetable.setChecked(draft.showInTimetable);
+        showInTimetable.setOnCheckedChangeListener((button, checked) -> draft.showInTimetable = checked);
+        form.addView(showInTimetable, new LinearLayout.LayoutParams(-1, -2));
+        TextView visibilityHint = text(s(R.string.event_show_in_timetable_hint), 11, muted, false);
+        visibilityHint.setPadding(dp(2), 0, 0, dp(8));
+        form.addView(visibilityHint);
 
         // Reminder: presets, or any N minutes typed by the user.
         TextView remindMode = text("", 11, coral, true);
@@ -1223,7 +1238,8 @@ final class PastelCourseSheet {
     }
 
     private static String eventSnapshot(EditText[] inputs, PersonalEvent d, boolean customReminder) {
-        StringBuilder s = new StringBuilder(d.year + "-" + d.month + "-" + d.day + "|" + d.remindMinutes + "|" + customReminder);
+        StringBuilder s = new StringBuilder(d.year + "-" + d.month + "-" + d.day + "|" + d.remindMinutes + "|" + customReminder
+                + "|" + d.showInTimetable);
         for (EditText input : inputs) {
             String raw = input == null ? "" : input.getText().toString();
             s.append('|').append(raw.length()).append(':').append(raw);

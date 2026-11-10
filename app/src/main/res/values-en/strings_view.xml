@@ -11,7 +11,7 @@
     </string-array>
     <string name="view_hint">Tap a course for details, long-press to edit; long-press an empty cell to add one</string>
     <string name="view_empty_default">No courses yet. Long-press an empty cell to add one</string>
-    <string name="view_title">Timetable</string>
+    <string name="view_title">Schedule</string>
     <string name="view_import_timetable">Import timetable</string>
     <string name="view_switch_light">Switch to light mode</string>
     <string name="view_switch_dark">Switch to dark mode</string>

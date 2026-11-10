@@ -11,7 +11,7 @@
     </string-array>
     <string name="view_hint">點按課程查看詳情，長按編輯；長按空白格新增課程</string>
     <string name="view_empty_default">還沒有課程，長按空白格新增</string>
-    <string name="view_title">課表</string>
+    <string name="view_title">日程表</string>
     <string name="view_import_timetable">匯入課表</string>
     <string name="view_switch_light">切換到淺色模式</string>
     <string name="view_switch_dark">切換到深色模式</string>
