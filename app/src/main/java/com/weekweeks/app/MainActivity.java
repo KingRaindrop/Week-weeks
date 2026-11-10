@@ -274,6 +274,8 @@ public class MainActivity extends AppCompatActivity {
         if (pastelTimetable != null) {
             getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
                 @Override public void handleOnBackPressed() {
+                    // System gesture Back and button Back must dismiss the top layer first.
+                    if (dismissSettingsOverlay()) return;
                     // 「我的」 is a tab: Back returns to 课表 before leaving the app.
                     if (pastelTimetable != null && pastelTimetable.isMine()) {
                         eventFromMine = false;
@@ -3054,6 +3056,14 @@ public class MainActivity extends AppCompatActivity {
         styleDialogWindow(dialog);
     }
 
+    private boolean dismissSettingsOverlay() {
+        View overlay = settingsOverlay;
+        if (overlay == null || overlay.getParent() == null) return false;
+        ((ViewGroup) overlay.getParent()).removeView(overlay);
+        settingsOverlay = null;
+        return true;
+    }
+
     private void showSettingsDialogV2() {
         if (settingsOverlay != null && settingsOverlay.getParent() != null) {
             settingsOverlay.requestFocus();
@@ -3068,15 +3078,19 @@ public class MainActivity extends AppCompatActivity {
         overlay.setClickable(true);
         overlay.setFocusable(true);
         overlay.setFocusableInTouchMode(true);
+        // Size against the actual window (including split screen), not display metrics.
+        final int outerMargin = dp(14);
+        overlay.setPadding(outerMargin, outerMargin, outerMargin, outerMargin);
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(overlay, (view, insets) -> {
+            androidx.core.graphics.Insets safe = insets.getInsets(
+                    androidx.core.view.WindowInsetsCompat.Type.systemBars()
+                            | androidx.core.view.WindowInsetsCompat.Type.displayCutout());
+            view.setPadding(outerMargin + safe.left, outerMargin + safe.top,
+                    outerMargin + safe.right, outerMargin + safe.bottom);
+            return insets;
+        });
         final Runnable[] dismissSettings = new Runnable[1];
-        dismissSettings[0] = () -> {
-            if (overlay.getParent() instanceof ViewGroup) {
-                ((ViewGroup) overlay.getParent()).removeView(overlay);
-            }
-            if (settingsOverlay == overlay) {
-                settingsOverlay = null;
-            }
-        };
+        dismissSettings[0] = this::dismissSettingsOverlay;
         overlay.setOnClickListener(view -> dismissSettings[0].run());
         overlay.setOnKeyListener((view, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
@@ -3087,8 +3101,7 @@ public class MainActivity extends AppCompatActivity {
             return false;
         });
 
-        LinearLayout glassPanel = new LinearLayout(this);
-        glassPanel.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout glassPanel = new AdaptiveSettingsPanel(this);
         glassPanel.setPadding(dp(20), dp(18), dp(20), dp(18));
         glassPanel.setBackground(glassPanelBackground(dp(26)));
         glassPanel.setClickable(true);
@@ -3229,12 +3242,12 @@ public class MainActivity extends AppCompatActivity {
 
         glassPanel.addView(scroller, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f
         ));
 
-        int availableWidth = getResources().getDisplayMetrics().widthPixels - dp(isCompactWidth() ? 28 : 56);
         FrameLayout.LayoutParams glassParams = new FrameLayout.LayoutParams(
-                Math.min(availableWidth, dp(430)),
+                ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.CENTER
         );
@@ -3244,6 +3257,7 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
         settingsOverlay = overlay;
+        androidx.core.view.ViewCompat.requestApplyInsets(overlay);
         overlay.requestFocus();
     }
 

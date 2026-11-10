@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="week_events_label">日程</string>
+    <string name="week_events_more">还有 %1$d 项</string>
+    <string name="week_events_collapse">收起</string>
+    <string name="week_event_description">%1$s，%2$s，%3$s</string>
+    <string name="week_events_toggle_description">%1$s，%2$s</string>
+</resources>

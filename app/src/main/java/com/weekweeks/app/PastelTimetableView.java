@@ -39,12 +39,15 @@ public class PastelTimetableView extends FrameLayout {
         String name, room, time, period, teacherLabel;
     }
 
-    /** A personal agenda item shown in the 日程 list of the week that contains its date. */
-    public static class EventEntry {
+    /** A personal agenda item shown in the list and independent week event strip. */
+    public static class EventEntry implements WeekEventLayout.Item {
         long id, endMillis;
         boolean hasEnd;
         int day, startMinutes;
         String title, time, location;
+        @Override public int eventDay() { return day; }
+        @Override public int eventStartMinutes() { return startMinutes; }
+        @Override public long eventId() { return id; }
     }
 
     public interface Actions {
@@ -350,9 +353,7 @@ public class PastelTimetableView extends FrameLayout {
                 : outsideSemester ? s(R.string.view_notice_outside_term)
                 : preview ? s(R.string.view_notice_preview)
                 : nonempty(emptyMessage, entries.isEmpty() ? this.emptyMessage : HINT));
-        int count = times.size();
-        grid.getLayoutParams().height = dp(34 + Math.max(1, count) * 54);
-        grid.requestLayout();
+        grid.updateHeight();
         renderedFinishedKey = finishedKey();
         grid.rebuild();
         rebuildList();
@@ -652,6 +653,7 @@ public class PastelTimetableView extends FrameLayout {
 
     /** Personal events of the displayed week; {@code dates} labels each weekday (Mon=0), may be null. */
     public void setEvents(List<EventEntry> weekEvents, String[] dates, long[] dateMillis) {
+        if (!java.util.Arrays.equals(dayDateMillis, dateMillis)) grid.collapseEvents();
         events.clear();
         if (weekEvents != null) for (EventEntry e : weekEvents) if (e != null) events.add(e);
         dayDates = dates == null ? null : dates.clone();
@@ -662,6 +664,7 @@ public class PastelTimetableView extends FrameLayout {
             dayRank[d] = dateMillis != null && dateMillis.length == 7 ? r : d;
         }
         renderedFinishedKey = finishedKey();
+        grid.rebuild();
         rebuildList();
     }
 
@@ -818,6 +821,29 @@ public class PastelTimetableView extends FrameLayout {
         private final float textScale = Math.max(1f, getResources().getConfiguration().fontScale);
         private final int heading = dp(34 * textScale), rowHeight = dp(54 * textScale);
         private int builtWidth = -1;
+        private final boolean[] expandedEvents = new boolean[7];
+        private final int eventCardHeight = dp(58 * textScale);
+        private final int eventControlHeight = dp(44 * textScale);
+        private int eventStripHeight;
+        private int courseTop() { return heading + eventStripHeight; }
+        void collapseEvents() { java.util.Arrays.fill(expandedEvents, false); }
+        void updateHeight() {
+            int rowsHeight = 0;
+            for (int day = 0; day < 7; day++) {
+                int count = WeekEventLayout.forDay(events, day).size();
+                int height = WeekEventLayout.visibleCount(count, expandedEvents[day]) * eventCardHeight;
+                if (count > WeekEventLayout.PREVIEW_COUNT) height += eventControlHeight;
+                rowsHeight = Math.max(rowsHeight, height);
+            }
+            eventStripHeight = rowsHeight == 0 ? 0 : rowsHeight + dp(4);
+            if (getLayoutParams() != null) {
+                int height = courseTop() + Math.max(1, times.size()) * rowHeight;
+                if (getLayoutParams().height != height) {
+                    getLayoutParams().height = height;
+                    requestLayout();
+                }
+            }
+        }
         WeekGrid(Context context) {
             super(context);
             setBackground(round(surface, 18));
@@ -830,6 +856,7 @@ public class PastelTimetableView extends FrameLayout {
             if (w != builtWidth) post(() -> { if (getWidth() != builtWidth) rebuild(); });
         }
         void rebuild() {
+            updateHeight();
             if (getWidth() == 0) return;
             builtWidth = getWidth();
             removeAllViews();
@@ -839,11 +866,20 @@ public class PastelTimetableView extends FrameLayout {
             periodHeading.setGravity(Gravity.CENTER);
             place(periodHeading, 0, 0, Math.round(left), heading);
             for (int day = 0; day < 7; day++) {
-                TextView label = text(DAYS[day], 10, actualWeek && day == today() ? coral : ink, actualWeek && day == today());
+                String dayLabel = DAYS[day];
+                if (dayDateMillis != null && dayDateMillis[day] > 0) {
+                    Calendar date = Calendar.getInstance();
+                    date.setTimeInMillis(dayDateMillis[day]);
+                    dayLabel += "\n" + (date.get(Calendar.MONTH) + 1) + "/" + date.get(Calendar.DAY_OF_MONTH);
+                }
+                TextView label = text(dayLabel, 10, actualWeek && day == today() ? coral : ink, actualWeek && day == today());
                 label.setGravity(Gravity.CENTER);
+                label.setMaxLines(2);
+                label.setEllipsize(TextUtils.TruncateAt.END);
                 place(label, Math.round(left + day * columnWidth), 0,
                         Math.round(left + (day + 1) * columnWidth) - Math.round(left + day * columnWidth), heading);
             }
+            buildEventStrip();
             for (int p = 0; p < times.size(); p++) {
                 LinearLayout ruler = column(); ruler.setGravity(Gravity.CENTER);
                 TextView number = text(String.valueOf(p + 1), 11, muted, true); number.setGravity(Gravity.CENTER);
@@ -855,7 +891,7 @@ public class PastelTimetableView extends FrameLayout {
                     LinearLayout.LayoutParams c = new LinearLayout.LayoutParams(-1, -2); c.topMargin = dp(2); ruler.addView(clock, c);
                 }
                 ruler.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-                place(ruler, 0, heading + p * rowHeight, Math.round(left), rowHeight);
+                place(ruler, 0, courseTop() + p * rowHeight, Math.round(left), rowHeight);
                 for (int day = 0; day < 7; day++) {
                     final int d = day, period = p + 1;
                     View empty = new View(getContext());
@@ -876,7 +912,7 @@ public class PastelTimetableView extends FrameLayout {
                         }
                     }
                     int x = Math.round(left + day * columnWidth);
-                    place(empty, x, heading + p * rowHeight,
+                    place(empty, x, courseTop() + p * rowHeight,
                             Math.round(left + (day + 1) * columnWidth) - x, rowHeight);
                 }
             }
@@ -920,10 +956,64 @@ public class PastelTimetableView extends FrameLayout {
                 name.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
                 room.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
                 int x = Math.round(left + entry.day * columnWidth) + dp(2);
-                place(card, x, heading + (entry.start - 1) * rowHeight + dp(2),
+                place(card, x, courseTop() + (entry.start - 1) * rowHeight + dp(2),
                         Math.max(1, Math.round(left + (entry.day + 1) * columnWidth) - x - dp(2)), cardHeight);
             }
             invalidate();
+        }
+        private void buildEventStrip() {
+            if (eventStripHeight == 0) return;
+            TextView label = text(s(R.string.week_events_label), 8, muted, true);
+            label.setGravity(Gravity.CENTER);
+            label.setMaxLines(3);
+            place(label, 0, heading, Math.round(left), Math.min(eventStripHeight, eventCardHeight));
+            long now = System.currentTimeMillis();
+            for (int day = 0; day < 7; day++) {
+                final int selectedDay = day;
+                List<EventEntry> dayEvents = WeekEventLayout.forDay(events, day);
+                int count = WeekEventLayout.visibleCount(dayEvents.size(), expandedEvents[day]);
+                // Use exactly the same rounded column boundaries as the course grid.
+                int x = Math.round(left + day * columnWidth) + dp(2);
+                int width = Math.max(1, Math.round(left + (day + 1) * columnWidth) - x - dp(2));
+                for (int index = 0; index < count; index++) {
+                    EventEntry event = dayEvents.get(index);
+                    boolean past = now >= event.endMillis;
+                    LinearLayout card = column();
+                    card.setPadding(dp(3), dp(4), dp(3), dp(3));
+                    card.setBackground(round(past ? withAlpha(theme.tint, 120) : theme.tint, 7));
+                    String clock = String.format(Locale.getDefault(), "%02d:%02d",
+                            event.startMinutes / 60, event.startMinutes % 60);
+                    TextView time = text(clock, 8, past ? muted : coral, true);
+                    time.setSingleLine(true);
+                    time.setEllipsize(TextUtils.TruncateAt.END);
+                    card.addView(time, new LinearLayout.LayoutParams(-1, -2));
+                    TextView title = text(nonempty(event.title, s(R.string.view_untitled_event)), 9, past ? muted : ink, true);
+                    title.setMaxLines(2);
+                    title.setEllipsize(TextUtils.TruncateAt.END);
+                    card.addView(title, new LinearLayout.LayoutParams(-1, -2));
+                    card.setContentDescription(s(R.string.week_event_description, DAYS[day],
+                            nonempty(event.time, clock), nonempty(event.title, s(R.string.view_untitled_event))));
+                    time.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+                    title.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+                    card.setOnClickListener(v -> { if (actions != null) actions.onEvent(event.id); });
+                    place(card, x, heading + index * eventCardHeight + dp(2), width, eventCardHeight - dp(4));
+                }
+                if (dayEvents.size() > WeekEventLayout.PREVIEW_COUNT) {
+                    int hidden = WeekEventLayout.hiddenCount(dayEvents.size(), expandedEvents[day]);
+                    TextView more = text(expandedEvents[day] ? s(R.string.week_events_collapse)
+                            : s(R.string.week_events_more, hidden), 9, coral, true);
+                    more.setGravity(Gravity.CENTER);
+                    more.setMaxLines(3);
+                    more.setEllipsize(TextUtils.TruncateAt.END);
+                    more.setContentDescription(s(R.string.week_events_toggle_description, DAYS[day], more.getText()));
+                    more.setBackground(round(theme.track, 7));
+                    more.setOnClickListener(v -> {
+                        expandedEvents[selectedDay] = !expandedEvents[selectedDay];
+                        rebuild();
+                    });
+                    place(more, x, heading + count * eventCardHeight + dp(2), width, eventControlHeight - dp(4));
+                }
+            }
         }
         private void place(View view, int x, int y, int width, int height) {
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, height); lp.leftMargin = x; lp.topMargin = y; addView(view, lp);
@@ -931,8 +1021,9 @@ public class PastelTimetableView extends FrameLayout {
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             paint.setColor(line); paint.setStrokeWidth(dp(1));
+            if (eventStripHeight > 0) canvas.drawLine(0, heading, getWidth(), heading, paint);
             for (int day = 0; day < 7; day++) canvas.drawLine(left + day * columnWidth, heading, left + day * columnWidth, getHeight(), paint);
-            for (int p = 0; p <= times.size(); p++) canvas.drawLine(0, heading + p * rowHeight, getWidth(), heading + p * rowHeight, paint);
+            for (int p = 0; p <= times.size(); p++) canvas.drawLine(0, courseTop() + p * rowHeight, getWidth(), courseTop() + p * rowHeight, paint);
         }
         @Override protected void dispatchDraw(Canvas canvas) {
             super.dispatchDraw(canvas);
@@ -949,13 +1040,13 @@ public class PastelTimetableView extends FrameLayout {
                 int end = minuteOf(m);
                 if (start < 0 || end <= start) { previousEnd = -1; continue; }
                 // Breaks between periods (课间、午休、晚饭) pin the line to the row boundary.
-                if (previousEnd >= 0 && minute >= previousEnd && minute < start) { y = heading + p * rowHeight; break; }
-                if (minute >= start && minute < end) { y = heading + (p + (minute - start) / (end - start)) * rowHeight; break; }
+                if (previousEnd >= 0 && minute >= previousEnd && minute < start) { y = courseTop() + p * rowHeight; break; }
+                if (minute >= start && minute < end) { y = courseTop() + (p + (minute - start) / (end - start)) * rowHeight; break; }
                 previousEnd = end;
             }
             if (y >= 0) {
                 int save = canvas.save();
-                clip.set(0, heading, getWidth(), getHeight());
+                clip.set(0, courseTop(), getWidth(), getHeight());
                 canvas.clipRect(clip);
                 paint.setColor(coral); paint.setStrokeWidth(dp(1.5f));
                 canvas.drawLine(left, y, getWidth(), y, paint);

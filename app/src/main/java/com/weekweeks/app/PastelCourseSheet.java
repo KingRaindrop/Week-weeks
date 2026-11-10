@@ -211,7 +211,7 @@ final class PastelCourseSheet {
 
         final EditText[] inputs = new EditText[4];
         final BottomSheetDialog[] holder = new BottomSheetDialog[1];
-        BottomSheetDialog dialog = new BottomSheetDialog(context) {
+        BottomSheetDialog dialog = new GuardedBottomSheetDialog(context) {
             @Override public void cancel() {
                 readInputs(draft, inputs);
                 if (allowClose[0] || snapshot(draft).equals(initial)) { super.cancel(); return; }
@@ -624,7 +624,7 @@ final class PastelCourseSheet {
         final EditText[] inputHolder = new EditText[1];
         final boolean[] allowClose = {false};
         final BottomSheetDialog[] holder = new BottomSheetDialog[1];
-        BottomSheetDialog dialog = new BottomSheetDialog(context) {
+        BottomSheetDialog dialog = new GuardedBottomSheetDialog(context) {
             @Override public void cancel() {
                 // Back / outside tap must not silently discard a pasted timetable.
                 String typed = inputHolder[0] == null ? "" : inputHolder[0].getText().toString().trim();
@@ -905,7 +905,7 @@ final class PastelCourseSheet {
         final boolean[] allowClose = {false};
         final BottomSheetDialog[] holder = new BottomSheetDialog[1];
         final String[] initial = {null};
-        BottomSheetDialog dialog = new BottomSheetDialog(context) {
+        BottomSheetDialog dialog = new GuardedBottomSheetDialog(context) {
             @Override public void cancel() {
                 if (allowClose[0] || eventSnapshot(inputs, draft, customReminder[0]).equals(initial[0])) { super.cancel(); return; }
                 confirm(s(R.string.sheet_discard_event_title), s(R.string.sheet_discard_message),
