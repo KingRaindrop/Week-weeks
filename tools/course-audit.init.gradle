@@ -1,0 +1,14 @@
+// Isolated package: never overwrites com.weekweeks.app or opens its stored timetable.
+// Build: gradlew.bat -I tools/course-audit.init.gradle assembleDebug assembleDebugAndroidTest
+// Install the two debug APKs, then run:
+// adb -s DEVICE shell am instrument -w com.weekweeks.app.audit.test/com.weekweeks.app.CourseCardDeviceTest
+// Require explicit PASS in instrumentation output (adb exit code alone is insufficient).
+gradle.beforeProject { project ->
+    project.pluginManager.withPlugin('com.android.application') {
+        project.androidComponents.finalizeDsl { android ->
+            android.defaultConfig.applicationId = 'com.weekweeks.app.audit'
+            android.defaultConfig.testInstrumentationRunner = 'com.weekweeks.app.CourseCardDeviceTest'
+            android.sourceSets.main.assets.setSrcDirs([])
+        }
+    }
+}

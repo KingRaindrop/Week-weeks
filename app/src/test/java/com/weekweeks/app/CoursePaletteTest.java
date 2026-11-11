@@ -127,7 +127,8 @@ public class CoursePaletteTest {
         for (int color : CoursePalette.MUTED_COLORS) {
             int surface = CoursePalette.mutedSurface(color, true);
             int finished = CoursePalette.finishedSurface(surface, true);
-            assertTrue(CoursePalette.contrast(finished, 0xFF000000) < CoursePalette.contrast(surface, 0xFF000000));
+            assertTrue(hslOf(finished)[1] <= hslOf(surface)[1] + .01);
+            assertTrue(CoursePalette.contrast(finished, CoursePalette.DARK_BASE) >= 1.6);
             assertTrue(CoursePalette.contrast(CoursePalette.finishedInk(finished, true), finished) >= 4.5);
         }
     }
@@ -154,22 +155,20 @@ public class CoursePaletteTest {
     }
 
     @Test
-    public void completionUsesThirtyPercentOpacityInLightAndFifteenPercentFadeInDark() {
-        for (int color : CoursePalette.MUTED_COLORS) {
-            for (boolean dark : new boolean[]{false, true}) {
-                int surface = CoursePalette.mutedSurface(color, dark);
-                int finished = CoursePalette.finishedSurface(surface, dark);
-                int target = dark ? CoursePalette.DARK_BASE : 0xFFFFFFFF;
+    public void completionKeepsExactLightCompositionForPresetsAndCustomColors() {
+        for (int color : completionSeeds()) {
+            for (int surface : new int[]{color, CoursePalette.courseSurface(color, false),
+                    CoursePalette.mutedSurface(color, false)}) {
+                int finished = CoursePalette.finishedSurface(surface, false);
+                assertEquals(255, finished >>> 24);
                 for (int shift : new int[]{16, 8, 0}) {
-                    int sourceChannel = (surface >>> shift) & 255;
-                    int targetChannel = (target >>> shift) & 255;
-                    int resultChannel = (finished >>> shift) & 255;
-                    double fade = dark ? 0.15 : 0.70;
-                    assertEquals((int) Math.round(sourceChannel * (1 - fade) + targetChannel * fade), resultChannel);
-                    double oldDistance = Math.abs(targetChannel - sourceChannel) * (dark ? 0.60 : 0.15);
-                    assertTrue(Math.abs(targetChannel - resultChannel) + 0.5 >= oldDistance);
+                    int channel = (surface >>> shift) & 255;
+                    assertEquals((int) Math.round(channel * 0.30 + 255 * 0.70),
+                            (finished >>> shift) & 255);
                 }
-                assertTrue(CoursePalette.contrast(CoursePalette.finishedInk(finished, dark), finished) >= 4.5);
+                int expectedInk = CoursePalette.contrast(0xFF566176, finished) >= 4.5
+                        ? 0xFF566176 : CoursePalette.readableInk(finished);
+                assertEquals(expectedInk, CoursePalette.finishedInk(finished, false));
             }
         }
     }
@@ -185,8 +184,6 @@ public class CoursePaletteTest {
             }
             int brighter = CoursePalette.mutedSurface(color, true);
             assertTrue(CoursePalette.contrast(brighter, 0xFF000000) > CoursePalette.contrast(old, 0xFF000000));
-            assertTrue(CoursePalette.contrast(CoursePalette.finishedSurface(brighter, true), 0xFF000000)
-                    > CoursePalette.contrast(CoursePalette.finishedSurface(old, true), 0xFF000000));
             assertEquals(color, CoursePalette.mutedSurface(color, false));
         }
         assertEquals(.52f, CoursePalette.LEGACY_DARK_VALUE, .0001f);
@@ -269,18 +266,15 @@ public class CoursePaletteTest {
             for (boolean dark : new boolean[]{false, true}) {
                 int surface = CoursePalette.courseSurface(color, dark);
                 int finished = CoursePalette.finishedSurface(surface, dark);
-                int target = dark ? CoursePalette.DARK_BASE : 0xFFFFFFFF;
-                double fade = dark ? .15 : .70;
                 assertTrue(surface != finished);
-                for (int shift : new int[]{16, 8, 0}) {
-                    int sourceChannel = (surface >>> shift) & 255;
-                    int targetChannel = (target >>> shift) & 255;
-                    assertEquals((int) Math.round(sourceChannel * (1 - fade) + targetChannel * fade),
-                            (finished >>> shift) & 255);
+                assertEquals(255, finished >>> 24);
+                if (dark) {
+                    assertTrue(hslOf(finished)[1] <= .13);
+                    assertTrue(CoursePalette.contrast(finished, CoursePalette.DARK_BASE) >= 1.6);
                 }
                 double beforeLuminance = CoursePalette.contrast(surface, 0xFF000000);
                 double afterLuminance = CoursePalette.contrast(finished, 0xFF000000);
-                assertTrue(dark ? afterLuminance < beforeLuminance : afterLuminance > beforeLuminance);
+                if (!dark) assertTrue(afterLuminance > beforeLuminance);
                 int expectedInk = dark ? 0xFFCBD5E1 : 0xFF566176;
                 assertEquals(expectedInk, CoursePalette.finishedInk(finished, dark));
                 assertTrue(CoursePalette.contrast(expectedInk, finished) >= 4.5);
@@ -325,6 +319,66 @@ public class CoursePaletteTest {
                 double distance = Math.abs(hslOf(CoursePalette.RANDOM_COLORS[i])[0]
                         - hslOf(CoursePalette.RANDOM_COLORS[j])[0]);
                 assertTrue(Math.min(distance, 360 - distance) >= 8);
+            }
+        }
+    }
+
+    private static int[] completionSeeds() {
+        int[] presets = CoursePalette.appendColors(LEGACY_COLORS);
+        int[] custom = {0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFF00,
+                0xFF00FFFF, 0xFFFF00FF, 0xFF000000, 0xFFFFFFFF, 0xFF808080,
+                0xFF010203, 0xFFFEFDFC, 0xFF123456, 0xFFABCDEF,
+                0x00446FA6, 0x8044AA11, 0x00000000};
+        int[] result = java.util.Arrays.copyOf(presets, presets.length + custom.length);
+        System.arraycopy(custom, 0, result, presets.length, custom.length);
+        return result;
+    }
+
+    @Test
+    public void darkCompletionDesaturatesPresetsAndCustomColorsWithoutLosingHueOrOpacity() {
+        for (int color : completionSeeds()) {
+            for (int surface : new int[]{color, CoursePalette.courseSurface(color, true),
+                    CoursePalette.mutedSurface(color, true)}) {
+                int finished = CoursePalette.finishedSurface(surface, true);
+                double[] before = hslOf(surface), after = hslOf(finished);
+                assertEquals(255, finished >>> 24);
+                assertEquals(finished, CoursePalette.finishedSurface(surface & 0x00FFFFFF, true));
+                assertEquals(.28, after[2], 1.0 / 255);
+                assertTrue(after[1] <= .13);
+                assertTrue(after[1] <= before[1] + .01);
+                if (before[1] >= .08) assertTrue(after[1] < before[1]);
+                if (channelSpan(finished) >= 8) {
+                    double distance = Math.abs(before[0] - after[0]);
+                    assertTrue(Math.min(distance, 360 - distance) <= 8);
+                }
+                if (channelSpan(surface) == 0) assertEquals(0, channelSpan(finished));
+                // A modest card/background separation, not a text-contrast claim.
+                assertTrue(Integer.toHexString(surface),
+                        CoursePalette.contrast(finished, CoursePalette.DARK_BASE) >= 1.6);
+            }
+        }
+    }
+
+    @Test
+    public void finishedPrimaryAndSecondaryInkAreOpaqueAndReadableAcrossSeedsAndModes() {
+        for (int color : completionSeeds()) {
+            for (boolean dark : new boolean[]{false, true}) {
+                for (int surface : new int[]{color, CoursePalette.courseSurface(color, dark)}) {
+                    int finished = CoursePalette.finishedSurface(surface, dark);
+                    for (int ink : new int[]{CoursePalette.finishedInk(finished, dark),
+                            CoursePalette.finishedSecondaryInk(finished, dark)}) {
+                        assertEquals(255, ink >>> 24);
+                        assertTrue(CoursePalette.contrast(ink, finished) >= 4.5);
+                    }
+                }
+            }
+        }
+        // Exercise contrast fallback independently of the normal finished surface range.
+        for (int channel = 0; channel <= 255; channel++) {
+            int background = 0xFF000000 | channel << 16 | channel << 8 | channel;
+            for (boolean dark : new boolean[]{false, true}) {
+                assertTrue(CoursePalette.contrast(CoursePalette.finishedInk(background, dark), background) >= 4.5);
+                assertTrue(CoursePalette.contrast(CoursePalette.finishedSecondaryInk(background, dark), background) >= 4.5);
             }
         }
     }

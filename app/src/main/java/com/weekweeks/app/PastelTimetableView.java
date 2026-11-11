@@ -15,6 +15,7 @@ import android.os.Build;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -570,16 +571,22 @@ public class PastelTimetableView extends FrameLayout {
             Entry entry = (Entry) item;
             LinearLayout card = column();
             card.setPadding(dp(15), dp(13), dp(15), dp(13));
-            card.setBackground(round(courseColor(entry), 15));
+            card.setBackground(courseBackground(entry, 15));
             card.addView(text(nonempty(entry.name, s(R.string.view_untitled_course)), 15, courseInk(entry), true));
-            TextView detail = text(nonempty(entry.time, timeRange(entry)) + "  ·  " + nonempty(entry.room, s(R.string.view_location_tbd))
-                    + (isFinished(entry) ? "  ·  " + s(R.string.view_finished) : ""), 12, courseInk(entry), false);
+            TextView detail = text(nonempty(entry.time, timeRange(entry)) + "  ·  " + nonempty(entry.room, s(R.string.view_location_tbd)), 12, courseSecondaryInk(entry), false);
             detail.setPadding(0, dp(5), 0, 0);
             card.addView(detail);
             if (!TextUtils.isEmpty(entry.teacherLabel)) {
-                TextView teacher = text(entry.teacherLabel, 12, courseInk(entry), false);
+                TextView teacher = text(entry.teacherLabel, 12, courseSecondaryInk(entry), false);
                 teacher.setPadding(0, dp(4), 0, 0);
                 card.addView(teacher);
+            }
+            if (isFinished(entry)) {
+                TextView badge = finishedBadge(entry, false);
+                badge.setGravity(Gravity.START);
+                LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-1, -2);
+                bp.topMargin = dp(6);
+                card.addView(badge, bp);
             }
             card.setOnClickListener(v -> openCourse(entry));
             card.setOnLongClickListener(v -> { editCourse(v, entry); return true; });
@@ -714,7 +721,7 @@ public class PastelTimetableView extends FrameLayout {
                 DAYS[Math.max(0, Math.min(6, e.day))], e.start, e.end,
                 nonempty(e.room, s(R.string.view_location_tbd)), nonempty(e.time, timeRange(e)))
                 + (TextUtils.isEmpty(e.teacherLabel) ? "" : s(R.string.view_desc_suffix, e.teacherLabel))
-                + (isFinished(e) ? s(R.string.view_desc_suffix, s(R.string.view_finished)) : "");
+                + (isFinished(e) ? s(R.string.view_desc_suffix, s(R.string.course_finished_label)) : "");
     }
     private String timeRange(Entry e) {
         if (e.start < 1 || e.end < e.start || e.end > times.size()) return s(R.string.view_time_unset);
@@ -726,11 +733,44 @@ public class PastelTimetableView extends FrameLayout {
         return start.isEmpty() || end.isEmpty() ? s(R.string.view_time_unset) : start + "–" + end;
     }
 
-    private int courseColor(Entry entry) {
+    private Drawable courseBackground(Entry entry, int radius) {
+        GradientDrawable base = round(courseColor(entry), radius);
+        if (!dark || !isFinished(entry)) return base;
+        GradientDrawable stripe = round(activeCourseColor(entry), 2);
+        android.graphics.drawable.LayerDrawable layers = new android.graphics.drawable.LayerDrawable(new Drawable[]{base, stripe});
+        layers.setLayerWidth(1, dp(3));
+        layers.setLayerGravity(1, Gravity.LEFT | Gravity.FILL_VERTICAL);
+        layers.setLayerInset(1, dp(2), dp(7), 0, dp(7));
+        return layers;
+    }
+
+    private TextView finishedBadge(Entry entry, boolean compact) {
+        TextView badge = text(compact ? "✓" : "✓ " + s(R.string.course_finished_label), 8.5f, courseSecondaryInk(entry), true);
+        badge.setSingleLine(true);
+        badge.setIncludeFontPadding(false);
+        badge.setGravity(Gravity.CENTER);
+        // Width is measured in the actual font: English and enlarged fonts may need icon-only.
+        if (!compact) badge.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            String full = "✓ " + s(R.string.course_finished_label);
+            String label = badge.getPaint().measureText(full) <= r - l - badge.getPaddingLeft() - badge.getPaddingRight() ? full : "✓";
+            if (!label.contentEquals(badge.getText())) badge.setText(label);
+        });
+        badge.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return badge;
+    }
+
+    private int courseSecondaryInk(Entry entry) {
+        return dark && isFinished(entry) ? CoursePalette.finishedSecondaryInk(courseColor(entry), dark) : courseInk(entry);
+    }
+
+    private int activeCourseColor(Entry entry) {
         int[] fallback = {0xFFDDEEE7, 0xFFE2E9FC, 0xFFF8E5D8, 0xFFEDE1F6, 0xFFF9E3E5};
         int paletteIndex = (int) ((entry.id % fallback.length + fallback.length) % fallback.length);
         int c = entry.color == 0 ? fallback[paletteIndex] : entry.color;
-        int surfaceColor = PastelCourseSheet.pastelSurface(c, dark);
+        return PastelCourseSheet.pastelSurface(c, dark);
+    }
+    private int courseColor(Entry entry) {
+        int surfaceColor = activeCourseColor(entry);
         if (!isFinished(entry)) return surfaceColor;
         return CoursePalette.finishedSurface(surfaceColor, dark);
     }
@@ -812,6 +852,33 @@ public class PastelTimetableView extends FrameLayout {
     private TextView nav(String label, String description, Runnable action) {
         TextView t = text(label, 27, ink, false); t.setGravity(Gravity.CENTER);
         t.setContentDescription(description); t.setOnClickListener(v -> action.run()); return t;
+    }
+
+    /** Use actual Android font/fallback metrics when the estimated title budget is too large. */
+    private final class CourseColumn extends LinearLayout {
+        TextView title;
+        CourseColumn() { super(PastelTimetableView.this.getContext()); setOrientation(VERTICAL); }
+        @Override protected void onMeasure(int widthSpec, int heightSpec) {
+            super.onMeasure(widthSpec, heightSpec);
+            while (title != null && title.getMaxLines() > 1 && clipsText(this)) {
+                title.setMaxLines(title.getMaxLines() - 1);
+                super.onMeasure(widthSpec, heightSpec);
+            }
+        }
+        private boolean clipsText(ViewGroup parent) {
+            for (int i = 0; i < parent.getChildCount(); i++) {
+                View child = parent.getChildAt(i);
+                if (child instanceof TextView) {
+                    TextView text = (TextView) child;
+                    android.text.Layout layout = text.getLayout();
+                    if (layout != null && layout.getLineCount() > 0) {
+                        int lines = Math.min(text.getMaxLines(), layout.getLineCount());
+                        if (layout.getLineBottom(lines - 1) > text.getMeasuredHeight() - text.getCompoundPaddingTop() - text.getCompoundPaddingBottom()) return true;
+                    }
+                } else if (child instanceof ViewGroup && clipsText((ViewGroup) child)) return true;
+            }
+            return false;
+        }
     }
 
     private final class WeekGrid extends FrameLayout {
@@ -919,27 +986,38 @@ public class PastelTimetableView extends FrameLayout {
             for (Entry entry : entries) {
                 if (entry.day < 0 || entry.day > 6 || entry.start < 1 || entry.start > times.size() || entry.end < entry.start) continue;
                 int end = Math.min(entry.end, times.size());
-                LinearLayout card = column(); card.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
-                card.setPadding(dp(2), dp(5), dp(2), dp(3));
-                card.setBackground(round(courseColor(entry), 10));
+                CourseColumn card = new CourseColumn(); card.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
+                card.setPadding(dp(dark && isFinished(entry) ? 6 : 2), dp(5), dp(2), dp(3));
+                card.setBackground(courseBackground(entry, 10));
+                boolean finished = isFinished(entry);
+                boolean compactFinished = finished && end == entry.start;
                 int cardHeight = (end - entry.start + 1) * rowHeight - dp(4);
                 boolean showTeacher = !TextUtils.isEmpty(entry.teacherLabel);
                 TextView name = text(nonempty(entry.name, s(R.string.view_untitled_course)), 10.5f, courseInk(entry), true);
+                card.title = name;
                 name.setGravity(Gravity.CENTER);
                 if (showTeacher) name.setIncludeFontPadding(false);
-                name.setMaxLines(Math.max(1, Math.min(8, (cardHeight - dp((showTeacher ? 38 : 20) * textScale)) / dp(14 * textScale))));
+                name.setMaxLines(Math.max(1, Math.min(8, (cardHeight - dp(((showTeacher ? 38 : 20) + (finished && !compactFinished ? 28 : 0)) * textScale)) / dp(14 * textScale))));
                 name.setEllipsize(TextUtils.TruncateAt.END);
                 name.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);
-                card.addView(name, new LinearLayout.LayoutParams(-1, -2));
-                TextView room = text(nonempty(entry.room, s(R.string.view_room_tbd_short)), 8.5f, courseInk(entry), false);
-                room.setGravity(Gravity.CENTER); room.setMaxLines(2); room.setEllipsize(TextUtils.TruncateAt.END);
+                if (compactFinished) {
+                    LinearLayout titleRow = row();
+                    titleRow.setGravity(Gravity.CENTER_VERTICAL);
+                    titleRow.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+                    titleRow.addView(finishedBadge(entry, true), new LinearLayout.LayoutParams(-2, -2));
+                    card.addView(titleRow, new LinearLayout.LayoutParams(-1, -2));
+                } else {
+                    card.addView(name, new LinearLayout.LayoutParams(-1, -2));
+                }
+                TextView room = text(nonempty(entry.room, s(R.string.view_room_tbd_short)), 8.5f, courseSecondaryInk(entry), false);
+                room.setGravity(Gravity.CENTER); room.setMaxLines(end == entry.start ? 1 : 2); room.setEllipsize(TextUtils.TruncateAt.END);
                 if (showTeacher) {
                     room.setIncludeFontPadding(false);
                     if (end == entry.start) room.setMaxLines(1);
                 }
                 LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2); rp.topMargin = dp(3); card.addView(room, rp);
                 if (showTeacher) {
-                    TextView teacher = text(entry.teacherLabel, 8.5f, courseInk(entry), false);
+                    TextView teacher = text(entry.teacherLabel, 8.5f, courseSecondaryInk(entry), false);
                     teacher.setGravity(Gravity.CENTER);
                     teacher.setIncludeFontPadding(false);
                     teacher.setSingleLine(true);
@@ -948,6 +1026,10 @@ public class PastelTimetableView extends FrameLayout {
                     LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, -2);
                     tp.topMargin = dp(2);
                     card.addView(teacher, tp);
+                }
+                if (finished && !compactFinished) {
+                    card.addView(new View(getContext()), new LinearLayout.LayoutParams(1, 0, 1));
+                    card.addView(finishedBadge(entry, false), new LinearLayout.LayoutParams(-1, dp(13 * textScale)));
                 }
                 card.setContentDescription(description(entry));
                 card.setOnClickListener(v -> openCourse(entry));

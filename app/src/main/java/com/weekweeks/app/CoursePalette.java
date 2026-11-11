@@ -154,13 +154,24 @@ final class CoursePalette {
         return chroma >= 40 && chroma >= max * 0.18;
     }
 
-    /** Light mode: equivalent to 30% background opacity over white; keep text independent.
-     * Precomposing prevents grid lines showing through and keeps list/grid surfaces identical.
-     * Dark mode retains its existing gentle fade.
+    /** Light mode keeps the existing opaque 30%-color-over-white composition.
+     * Dark mode uses a low-saturation, same-hue gray at fixed 28% HSL lightness:
+     * it recedes without disappearing into DARK_BASE, even for custom/transparent seeds.
+     * Text contrast is handled independently rather than fading the whole card.
      */
     static int finishedSurface(int surface, boolean dark) {
-        int target = dark ? DARK_BASE : WHITE;
-        return mix(surface, target, dark ? 0.15 : 0.70);
+        if (!dark) return mix(surface, WHITE, 0.70);
+        double r = red(surface) / 255.0, g = green(surface) / 255.0, b = blue(surface) / 255.0;
+        double max = Math.max(r, Math.max(g, b)), min = Math.min(r, Math.min(g, b));
+        double delta = max - min;
+        if (delta == 0) return hsl(0, 0, 0.28);
+        double lightness = (max + min) / 2.0;
+        double saturation = delta / (1 - Math.abs(2 * lightness - 1));
+        double hue;
+        if (max == r) hue = ((g - b) / delta + 6) % 6;
+        else if (max == g) hue = (b - r) / delta + 2;
+        else hue = (r - g) / delta + 4;
+        return hsl(hue, Math.min(0.12, saturation * 0.35), 0.28);
     }
 
     /** Preserve the usual course ink where possible; brighter neutral cards may need black. */
@@ -177,6 +188,12 @@ final class CoursePalette {
     /** De-emphasize finished labels without losing readable contrast. */
     static int finishedInk(int background, boolean dark) {
         int mutedInk = dark ? 0xFFCBD5E1 : 0xFF566176;
+        return contrast(mutedInk, background) >= 4.5 ? mutedInk : readableInk(background);
+    }
+
+    /** Softer opaque ink for finished location/teacher/status labels, still WCAG AA. */
+    static int finishedSecondaryInk(int background, boolean dark) {
+        int mutedInk = dark ? 0xFFB3BECE : 0xFF667085;
         return contrast(mutedInk, background) >= 4.5 ? mutedInk : readableInk(background);
     }
 
