@@ -115,7 +115,11 @@ Reminders may be affected by notification permissions, exact alarm permissions, 
 
 The official application ID is `com.weekweeks.app`. Development and release builds use the same current interface; there are no separate “original” and “pastel” product editions. The internal `pastel` build is retained only as a compatibility testing entry point, not a separate product version. Data does not migrate automatically between different application IDs, and apps from before the rename are not automatically uninstalled.
 
-The current source version is **1.2.7** (`versionCode 10`). This repository does not assume a download URL. If an APK has not yet been published, you can build it from source as described below.
+The current source version is **1.2.8** (`versionCode 11`).
+
+Download: [Week weeks 1.2.8 APK](https://github.com/KingRaindrop/Week-weeks/releases/download/v1.2.8/week-weeks-1.2.8.apk) · [GitHub Release page](https://github.com/KingRaindrop/Week-weeks/releases/tag/v1.2.8). You can also build from source as described below.
+
+The official APK does not include the local OPPO Sans font file; the app uses the system font when that file is unavailable.
 
 ## Current changes and verification
 

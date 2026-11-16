@@ -115,7 +115,11 @@
 
 正式应用包名为 `com.weekweeks.app`。开发版与正式版均使用同一套最新界面，不再区分“原版／清新版”；内部 `pastel` 构建仅为兼容测试入口，不是另一个产品版本。不同包名的数据不自动迁移，更名前的旧应用也不会被自动卸载。
 
-当前源码版本为 **1.2.7**（`versionCode 10`）。本仓库不预设下载地址；若项目尚未发布 APK，可按下面的方式自行构建。
+当前源码版本为 **1.2.8**（`versionCode 11`）。
+
+下载：[Week weeks 1.2.8 APK](https://github.com/KingRaindrop/Week-weeks/releases/download/v1.2.8/week-weeks-1.2.8.apk) · [GitHub Release 页面](https://github.com/KingRaindrop/Week-weeks/releases/tag/v1.2.8)。也可以按下面的方式自行构建。
+
+官方 APK 不包含本地 OPPO Sans 字体文件；该字体不可用时使用系统字体。
 
 ## 本轮更新与验证
 
