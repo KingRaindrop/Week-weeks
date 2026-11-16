@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="event_time_summary">%1$s–%2$s · %3$s</string>
+    <string name="event_time_summary_no_end">%1$s · No end time set</string>
+    <string name="event_time_duration_hours_minutes">%1$d hr %2$d min</string>
+    <string name="event_time_duration_hours">%1$d hr</string>
+    <string name="event_time_duration_minutes">%1$d min</string>
+    <string name="event_time_error_start_required">Enter a start time</string>
+    <string name="event_time_error_start_invalid">Invalid start time. Enter a time from 00:00 to 23:59.</string>
+    <string name="event_time_error_end_invalid">Invalid end time. Enter a time from 00:00 to 23:59.</string>
+    <string name="event_time_error_order">End time must be after the start time and on the same day.</string>
+</resources>

@@ -75,7 +75,7 @@ Use an alias that actually exists in your keystore. Renaming a product is not a 
 ## 验证 / Verification
 
 ```powershell
-.\gradlew.bat lintRelease testDebugUnitTest testReleaseUnitTest assembleRelease
+.\gradlew.bat lintDebug lintRelease testDebugUnitTest testReleaseUnitTest assembleRelease
 
 # Behavioral tests using deterministic Android service doubles
 .\tools\verify-reminders.ps1
@@ -85,17 +85,48 @@ Use an alias that actually exists in your keystore. Renaming a product is not a 
 
 The reminder harness requires `JAVA_HOME`. It tests scheduler and receiver behavior with service doubles, not Android IPC, the real Keystore or notification delivery. Unit tests are not device or visual tests.
 
-The latest interface-unification check passed 128 tests for each of debug and release, with no release lint issues. These are recorded results, not a live CI badge; see the [change log](<CHANGELOG.md>).
+2026-11-16 验证结果：Debug／Release 各 368 项单元测试通过；Lint 各 0 错误、7 项既有警告。Android 12／API 32 上的独立 audit 安装通过界面 993 项、时间轴 233 项、模式切换 456 项、课程布局 648 组及 22 组深色角色检查，并通过提醒与弹窗回归。这些是已执行的验证记录，不是实时 CI 状态；详见[变更日志](<CHANGELOG.md>)与[界面优化记录](<UI-REFINEMENT-20261116.md>)。
+
+The November 16, 2026 checks passed 368 unit tests for each of debug and release. Lint reported 0 errors and 7 existing warnings for each. Device checks used an isolated audit installation on Android 12 / API 32; they do not establish coverage of every Android version or vendor.
+
+### 隔离设备测试 / Isolated device tests
+
+设备回归工具将目标包名改为 `com.weekweeks.app.audit`，测试包为 `com.weekweeks.app.audit.test`。安装前核验 APK 包名，勿将常规 debug APK 覆盖到已有正式安装。以下使用虚构课表夹具，只检查解析器：
+
+```powershell
+.\gradlew.bat -I tools/course-audit.init.gradle -PparserAudit=true assembleDebug assembleDebugAndroidTest
+# Set $device to the ID reported by adb devices; verify the generated APK IDs first.
+adb -s $device install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s $device install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s $device shell am instrument -w com.weekweeks.app.audit.test/com.weekweeks.app.ParserDeviceTest
+# Restore ordinary build outputs after using an audit init script.
+.\gradlew.bat assembleDebug
+```
+
+必须核对输出中的 `PARSER PASS`，不能仅依据 ADB 的退出码。其余入口见 `tools/*-audit.init.gradle`；界面优化测试需要真实 OPPO Sans，时间轴测试仅在传入 `-e font oppo_sans` 时要求该字体。字体需自行取得，不包含在仓库中。课程／解析器测试入口会移除主应用字体资源，可在没有该字体的克隆中运行。
+
+Require the explicit `PARSER PASS` marker, not only a successful ADB exit code. The UI refinement audit requires the separately obtained OPPO Sans font; the agenda timeline audit only requires it when invoked with `-e font oppo_sans`. The course/parser audit removes main font assets. Normal application builds fall back to the system font if the optional file is absent.
+
+公开测试夹具位于 `app/src/test/resources` 和 `app/src/androidTest/assets/parser-fixtures`，均使用虚构内容，不依赖忽略的 `samples/` 目录或私人课表。导入模板可在[模板目录](<templates/>)下载；重新生成方法见[夹具生成器](<../tools/create-import-samples.py>)。
+
+发布前替换合成 PDF 后，Debug／Release 各 368 项单元测试、Android 解析器 `PARSER PASS` 与常规 Debug 构建已重新验证通过。
 
 ## 项目结构 / Source map
 
 ```text
 app/src/main/java/com/weekweeks/app/
-  MainActivity.java          Navigation, forms and persistence
+  MainActivity.java          Navigation and feature integration
   PastelTimetableView.java   Current timetable interface
   PastelCourseSheet.java     Course and event sheets
   PdfCourseParser.java       Text-based PDF extraction
   TextTimetableParser.java   Pasted timetable parsing
+  TimetableFileParser.java   PDF / XLSX / CSV / TSV / TXT dispatch
+  XlsxTimetableParser.java   Spreadsheet list parsing
+  DisplayMode.java           Course / agenda / combined content filters
+  AgendaTimelineLayout.java  Event duration and overlap layout
+  AcademicCalendarStore.java Calendar persistence and validation
+  ModalCoordinator.java      Dialog ordering and recovery
+  UiSemanticPalette.java    Theme surface, accent and error roles
   SecureStorage.java        Android Keystore + AES/GCM
   ReminderScheduler.java    Local reminder scheduling
 app/src/main/res/            Strings, icons and themes
@@ -112,11 +143,11 @@ The OPPO Sans file is proprietary, is roughly 21.7 MB, and is **not redistribute
 ## 已知边界 / Known limits
 
 - PDF parsing targets supported text-based timetable layouts; it does not perform OCR or promise universal school compatibility.
-- Text import keywords remain Chinese in all UI languages.
+- Spreadsheet and text imports expect one course per row; common Simplified Chinese, Traditional Chinese and English headers are supported. Legacy `.xls` files must be converted to XLSX or CSV.
 - Data stays local. There is no complete backup/restore or cross-device sync feature; keep original import files.
 - Renamed and compatibility packages have separate data directories. They do not automatically migrate data or uninstall older packages.
 - The legacy helper `tools/verify-logic.ps1` also attempts a standalone `javac` check using compile stubs; those stubs are not a full Android SDK replacement. Prefer Gradle tasks for the complete application build.
 
-历史发布快照不代表当前源码。发行脚本使用显式清单复制文件；修改文档或添加图片后，应先检查清单是否包含它们。本轮只更新清单，不运行会重建发行目录的打包过程。
+历史发布快照不代表当前源码。发行脚本使用显式清单复制文件；打包前应核对新增源码、文档和测试资源是否在清单覆盖范围内。本次更新不生成发行归档。
 
 Historical distribution snapshots are not the current source tree. The release packaging script uses an explicit file list; ensure new documentation and images are included before packaging. No release archive is generated as part of this documentation update.

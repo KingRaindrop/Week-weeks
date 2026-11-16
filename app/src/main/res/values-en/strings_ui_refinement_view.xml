@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_refinement_layout_week">Week view</string>
+    <string name="ui_refinement_layout_list">List</string>
+    <string name="ui_refinement_mode_courses">Courses</string>
+    <string name="ui_refinement_mode_agenda">Events</string>
+    <string name="ui_refinement_mode_combined">Combined</string>
+    <string name="ui_refinement_content_mode">Content: %1$s</string>
+    <string name="ui_refinement_group_count_many">99+</string>
+</resources>

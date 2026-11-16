@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_refinement_layout_week">週視圖</string>
+    <string name="ui_refinement_layout_list">列表</string>
+    <string name="ui_refinement_mode_courses">課程</string>
+    <string name="ui_refinement_mode_agenda">日程</string>
+    <string name="ui_refinement_mode_combined">綜合</string>
+    <string name="ui_refinement_content_mode">顯示內容：%1$s</string>
+    <string name="ui_refinement_group_count_many">99+</string>
+</resources>

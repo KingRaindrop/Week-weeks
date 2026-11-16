@@ -19,3 +19,6 @@ app/src/main/assets/fonts/*.ttf
 
 # Scratch harness used to dump parser output for one local PDF.
 tools/ReproRun.java
+
+# Private parser reference retained locally; public tests use synthetic-timetable.pdf.
+app/src/androidTest/assets/parser-fixtures/test-timetable.pdf

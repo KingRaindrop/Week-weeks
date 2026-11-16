@@ -7,7 +7,8 @@ final class UiAccentPalette {
     static final int CORAL_INDEX = 7;
     static final String[] NAMES = {
             "蓝色", "青绿", "绿色", "紫色", "橙色", "红色", "靛青", "珊瑚",
-            "暗夜", "玫瑰花园", "湖光", "日落霞光", "森林低语", "海风", "薰衣草梦", "杏茶时光"
+            "暗夜", "玫瑰花园", "湖光", "日落霞光", "森林低语", "海风", "薰衣草梦", "杏茶时光",
+            "雾蓝", "鼠尾草", "烟紫", "月白青", "灰玫瑰", "燕麦茶"
     };
     /** Light / dark pairs: quieter pigments in light mode, softer luminous accents in dark mode. */
     static final int[][] COLORS = {
@@ -26,16 +27,24 @@ final class UiAccentPalette {
             {0xFF42765B, 0xFF98CBAA}, // 森林低语：苔叶绿
             {0xFF277C78, 0xFF8BD1C8}, // 海风：清透青碧
             {0xFF78609E, 0xFFC8B4E7}, // 薰衣草梦：柔雾紫
-            {0xFF956D45, 0xFFDBBC94}  // 杏茶时光：温润茶棕
+            {0xFF956D45, 0xFFDBBC94}, // 杏茶时光：温润茶棕
+            {0xFF4A648B, 0xFFA8BFE8}, // 雾蓝
+            {0xFF4E7058, 0xFFB0C9B5}, // 鼠尾草
+            {0xFF70578F, 0xFFC4B6DD}, // 烟紫
+            {0xFF3C716C, 0xFF9FCFC9}, // 月白青
+            {0xFF8F5268, 0xFFD9B0BD}, // 灰玫瑰
+            {0xFF7E6341, 0xFFD7C1A1}  // 燕麦茶
     };
 
     private static final String[] NAMES_HANT = {
             "藍色", "青綠", "綠色", "紫色", "橙色", "紅色", "靛青", "珊瑚",
-            "暗夜", "玫瑰花園", "湖光", "日落霞光", "森林低語", "海風", "薰衣草夢", "杏茶時光"
+            "暗夜", "玫瑰花園", "湖光", "日落霞光", "森林低語", "海風", "薰衣草夢", "杏茶時光",
+            "霧藍", "鼠尾草", "煙紫", "月白青", "灰玫瑰", "燕麥茶"
     };
     private static final String[] NAMES_EN = {
             "Blue", "Teal", "Green", "Purple", "Orange", "Red", "Indigo", "Coral",
-            "Midnight", "Rose Garden", "Lake", "Sunset", "Forest", "Sea Breeze", "Lavender", "Almond Tea"
+            "Midnight", "Rose Garden", "Lake", "Sunset", "Forest", "Sea Breeze", "Lavender", "Almond Tea",
+            "Mist Blue", "Sage", "Smoky Lilac", "Moonlit Teal", "Dusty Rose", "Oat Tea"
     };
 
     private UiAccentPalette() { }

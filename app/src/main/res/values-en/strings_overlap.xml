@@ -1,0 +1,17 @@
+<resources>
+    <plurals name="overlap_course_count">
+        <item quantity="one">%1$d class</item><item quantity="other">%1$d classes</item>
+    </plurals>
+    <string name="overlap_pick_course">Tap to choose</string>
+    <string name="overlap_courses_title">Overlapping classes</string>
+    <string name="overlap_courses_description">%1$s, periods %2$d–%3$d. Overlapping classes: %4$s. Tap to choose a class</string>
+    <plurals name="import_overlap_count">
+        <item quantity="one">%1$d pair of classes overlaps</item><item quantity="other">%1$d pairs of classes overlap</item>
+    </plurals>
+    <string name="import_overlap_explanation">Importing keeps these classes. Tap their shared entry in the week view to view or edit each class. You can also cancel and correct the file first.</string>
+    <string name="import_overlap_pair">• %1$s / %2$s: %3$s, periods %4$d–%5$d, with shared teaching weeks</string>
+    <plurals name="import_overlap_more">
+        <item quantity="one">%1$d more overlapping pair. Open the shared entries after importing to review.</item>
+        <item quantity="other">%1$d more overlapping pairs. Open the shared entries after importing to review.</item>
+    </plurals>
+</resources>

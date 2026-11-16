@@ -1,0 +1,11 @@
+// Isolated display-mode integration runner; never replaces the user-facing application.
+gradle.beforeProject { project ->
+    project.pluginManager.withPlugin('com.android.application') {
+        project.androidComponents.finalizeDsl { android ->
+            android.defaultConfig.applicationId = 'com.weekweeks.app.audit'
+            android.defaultConfig.testInstrumentationRunner = 'com.weekweeks.app.DisplayModeDeviceTest'
+            android.buildTypes.debug.buildConfigField 'boolean', 'ENABLE_TEST_COURSE', 'false'
+            android.sourceSets.main.assets.setSrcDirs([])
+        }
+    }
+}

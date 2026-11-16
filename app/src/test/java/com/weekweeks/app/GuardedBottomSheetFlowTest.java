@@ -13,9 +13,10 @@ public class GuardedBottomSheetFlowTest {
         return Files.readString(root.resolve(name)).replace("\r\n", "\n");
     }
 
-    @Test public void everyDirtyEditorUsesGuardButOrdinarySheetsKeepMaterialBehavior() throws Exception {
+    @Test public void everyDirtyEditorKeepsGuardThroughCoordinatedSubclass() throws Exception {
         String sheets = source("PastelCourseSheet.java");
-        assertEquals(3, sheets.split("new GuardedBottomSheetDialog\\(context\\) ", -1).length - 1);
+        assertTrue(sheets.contains("class ManagedSheet extends GuardedBottomSheetDialog"));
+        assertEquals(3, sheets.split("new ManagedSheet\\(context\\) \\{", -1).length - 1);
         assertEquals(3, sheets.split("@Override public void cancel\\(\\)", -1).length - 1);
         assertFalse(sheets.contains("new BottomSheetDialog(context) {"));
         assertTrue(sheets.contains("BottomSheetDialog dialog = new BottomSheetDialog(context);"));

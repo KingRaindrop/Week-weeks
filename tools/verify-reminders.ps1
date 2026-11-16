@@ -23,7 +23,7 @@ public class Build { public static class VERSION { public static int SDK_INT=33;
 '@
 'android/os/SystemClock.java' = @'
 package android.os;
-public class SystemClock { public static long elapsedRealtimeNanos() { return System.nanoTime(); } }
+public class SystemClock { public static long elapsedMillis=864_000_000L; public static long elapsedRealtime(){return elapsedMillis;} public static long elapsedRealtimeNanos() { return System.nanoTime(); } }
 '@
 'android/content/pm/PackageManager.java' = @'
 package android.content.pm;
@@ -45,6 +45,7 @@ package android.content;
 import java.util.*;
 public class Intent {
  public static final String ACTION_BOOT_COMPLETED="android.intent.action.BOOT_COMPLETED", ACTION_MY_PACKAGE_REPLACED="android.intent.action.MY_PACKAGE_REPLACED";
+ public static final String ACTION_TIME_CHANGED="android.intent.action.TIME_SET", ACTION_TIMEZONE_CHANGED="android.intent.action.TIMEZONE_CHANGED";
  public static final int FLAG_ACTIVITY_NEW_TASK=1, FLAG_ACTIVITY_CLEAR_TOP=2, FLAG_ACTIVITY_SINGLE_TOP=4;
  private final Map<String,Object> extras=new HashMap<>(); private String action;
  public Intent() {} public Intent(Context c,Class<?> cls) {} public Intent(String action) { this.action=action; }
@@ -66,6 +67,10 @@ package android.content;
 import java.util.*;
 public class SharedPreferences {
  private final Map<String,Object> data=new HashMap<>();
+ public boolean commitAllowed=true;
+ public int failedCommits=0;
+ public int commitCalls=0,failAtCommit=-1;
+ public Map<String,?> getAll(){return new HashMap<>(data);}
  public String getString(String k,String d){return (String)data.getOrDefault(k,d);}
  public boolean getBoolean(String k,boolean d){return (Boolean)data.getOrDefault(k,d);}
  public long getLong(String k,long d){return ((Number)data.getOrDefault(k,d)).longValue();}
@@ -75,7 +80,12 @@ public class SharedPreferences {
   public Editor putString(String k,String v){pending.put(k,v);return this;}
   public Editor putBoolean(String k,boolean v){pending.put(k,v);return this;}
   public Editor putLong(String k,long v){pending.put(k,v);return this;}
-  public boolean commit(){data.putAll(pending);return true;}
+  public Editor putInt(String k,int v){pending.put(k,v);return this;}
+  public Editor putFloat(String k,float v){pending.put(k,v);return this;}
+  public Editor putStringSet(String k,Set<String> v){pending.put(k,v);return this;}
+  public Editor remove(String k){pending.put(k,null);return this;}
+  // Android publishes the in-memory map before the disk result, including failed commits.
+  public boolean commit(){for(String k:pending.keySet()){if(pending.get(k)==null)data.remove(k);else data.put(k,pending.get(k));}commitCalls++;if(commitCalls==failAtCommit)return false;if(failedCommits>0){failedCommits--;return false;}return commitAllowed;}
  }
 }
 '@
@@ -131,16 +141,17 @@ public class PendingIntent {
 package android.app;
 import java.util.*;
 public class AlarmManager {
- public static final int RTC_WAKEUP=0;
+ public static final int RTC_WAKEUP=0,ELAPSED_REALTIME_WAKEUP=2;
  public static final String ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED";
  public boolean allowed=true, fail=false; public int exactCalls=0, fallbackCalls=0;
  public final Map<Integer,Long> times=new HashMap<>();
+ public final Map<Integer,Integer> types=new HashMap<>();
  public final Map<Integer,PendingIntent> pending=new HashMap<>();
  public boolean canScheduleExactAlarms(){return allowed;}
- public void setExactAndAllowWhileIdle(int type,long at,PendingIntent p){if(fail)throw new SecurityException();exactCalls++;times.put(p.code,at);pending.put(p.code,p);}
- public void setAndAllowWhileIdle(int type,long at,PendingIntent p){if(fail)throw new SecurityException();fallbackCalls++;times.put(p.code,at);pending.put(p.code,p);}
- public void cancel(PendingIntent p){times.remove(p.code);pending.remove(p.code);}
- public void simulateSystemCancellation(){times.clear();pending.clear();}
+ public void setExactAndAllowWhileIdle(int type,long at,PendingIntent p){if(fail)throw new SecurityException();exactCalls++;times.put(p.code,at);types.put(p.code,type);pending.put(p.code,p);}
+ public void setAndAllowWhileIdle(int type,long at,PendingIntent p){if(fail)throw new SecurityException();fallbackCalls++;times.put(p.code,at);types.put(p.code,type);pending.put(p.code,p);}
+ public void cancel(PendingIntent p){times.remove(p.code);types.remove(p.code);pending.remove(p.code);}
+ public void simulateSystemCancellation(){times.clear();types.clear();pending.clear();}
 }
 '@
 'android/app/Notification.java' = @'
@@ -233,6 +244,11 @@ import android.content.Context;
 /** Test double: the real class only rewrites the locale, which these checks do not exercise. */
 final class AppLanguage { static Context wrap(Context base){return base;} }
 '@
+'com/weekweeks/app/ReminderSourceRebuilder.java' = @'
+package com.weekweeks.app;
+/** Compilation bridge for legacy boot/update/grant checks; time-zone rebuilding has device coverage. */
+final class ReminderSourceRebuilder { static void rebuild(android.content.Context context) {} }
+'@
 'com/weekweeks/app/R.java' = @'
 package com.weekweeks.app;
 public class R {
@@ -256,6 +272,56 @@ public final class ReminderRegressionTest {
  private static void off(Context c){c.prefs.edit().putBoolean("notifications_enabled",false).commit();}
  private static void deliver(Context c,Intent i){new ClassReminderReceiver().onReceive(c,i);}
  private static void boot(Context c,String action){new ReminderBootReceiver().onReceive(c,new Intent(action));}
+ private static ReminderScheduler.Entry event(int code,String title,long at){return new ReminderScheduler.Entry(code,title,"10:00","Event room",15,new long[]{at},ReminderScheduler.KIND_EVENT);}
+ private static void partialRebuildChecks(){
+  long first=System.currentTimeMillis()+600_000L,second=first+600_000L;
+  Context c=new Context();ReminderScheduler.replaceSchedule(c,List.of(entry(7,first,second),event(8,"Original event",first)));
+  Intent oldCourse=alarm(c,7);
+  ReminderScheduler.replaceSchedule(c,List.of(event(7,"New event",second)),false,true);
+  check(c.alarms.times.size()==2&&c.alarms.times.get(7)==first&&c.alarms.times.get(8)==second,"locked course plan survives healthy event replacement and code collision");
+  check("Math".equals(alarm(c,7).getStringExtra(ClassReminderReceiver.EXTRA_COURSE_NAME))&&"New event".equals(alarm(c,8).getStringExtra(ClassReminderReceiver.EXTRA_COURSE_NAME)),"partial replacement retains course and publishes new event payload");
+  deliver(c,oldCourse);check(c.notifications.count==0,"partial rebuild invalidates queued old generation");
+  deliver(c,alarm(c,7));check(c.notifications.count==1&&c.alarms.times.get(7)==second,"preserved course chain still delivers and continues");
+  deliver(c,alarm(c,8));check(c.notifications.count==2&&"New event".equals(c.notifications.last.title),"renumbered healthy event delivers");
+  ReminderScheduler.replaceSchedule(c,List.of(),false,true);
+  check(c.alarms.times.size()==1&&c.alarms.pending.containsKey(7),"deleting all healthy events leaves locked course plan");
+  c=new Context();ReminderScheduler.replaceSchedule(c,List.of(entry(7,first),event(8,"Locked event",second)));
+  ReminderScheduler.replaceSchedule(c,List.of(entry(8,first)),true,false);
+  check(c.alarms.times.size()==2&&c.alarms.times.get(8)==second&&c.alarms.times.get(9)==first,"locked event plan survives healthy course replacement and code collision");
+  check(ReminderScheduler.KIND_EVENT.equals(alarm(c,8).getStringExtra(ClassReminderReceiver.EXTRA_KIND))&&ReminderScheduler.KIND_COURSE.equals(alarm(c,9).getStringExtra(ClassReminderReceiver.EXTRA_KIND)),"preserved and renumbered kinds stay intact");
+  deliver(c,alarm(c,8));check(c.notifications.count==1&&"Locked event".equals(c.notifications.last.title),"preserved event still delivers");
+  ReminderScheduler.replaceSchedule(c,List.of(),true,false);check(c.alarms.times.size()==1&&c.alarms.pending.containsKey(8),"deleting healthy courses keeps locked event");
+  String stored=c.prefs.getString("class_reminder_schedule_encrypted_v1","");int calls=c.alarms.exactCalls;
+  ReminderScheduler.replaceSchedule(c,List.of(entry(1,first),event(2,"Must ignore",first)),false,false);
+  check(stored.equals(c.prefs.getString("class_reminder_schedule_encrypted_v1",""))&&calls==c.alarms.exactCalls,"both locked stores leave schedule untouched");
+  c.prefs.edit().putString("class_reminder_schedule_encrypted_v1","corrupt").commit();
+  ReminderScheduler.replaceSchedule(c,List.of(entry(1,first)),true,false);
+  check("corrupt".equals(c.prefs.getString("class_reminder_schedule_encrypted_v1",""))&&calls==c.alarms.exactCalls,"partial rebuild cannot overwrite unreadable mixed schedule");
+  check(!c.prefs.getBoolean("class_reminder_last_submission_ok",true),"unreadable partial schedule reports persistence failure");
+  ReminderScheduler.replaceSchedule(c,List.of(entry(1,first)),true,true);
+  check(!"corrupt".equals(c.prefs.getString("class_reminder_schedule_encrypted_v1",""))&&c.alarms.pending.containsKey(1),"fully readable stores can recover corrupt reminder schedule");
+  c=new Context();ReminderScheduler.replaceSchedule(c,List.of(event(Integer.MAX_VALUE,"Locked max",first)));
+  ReminderScheduler.replaceSchedule(c,List.of(entry(Integer.MAX_VALUE,second),entry(1,second),event(99,"Ignored locked input",first)),true,false);
+  check(c.alarms.times.size()==3&&c.alarms.pending.containsKey(Integer.MAX_VALUE)&&c.alarms.pending.containsKey(1)&&c.alarms.pending.containsKey(2),"partial collision wraps without losing other replacements or accepting locked input");
+ }
+ private static void failedReplacementChecks(){
+  long first=System.currentTimeMillis()+600_000L,second=first+600_000L;
+  for(int failures:new int[]{1,2})for(boolean full:new boolean[]{false,true}){
+   Context c=new Context();ReminderScheduler.replaceSchedule(c,List.of(entry(7,first,second),event(8,"Retained event",first)));
+   String before=c.prefs.getString("class_reminder_schedule_encrypted_v1",null);
+   Intent oldCourse=alarm(c,7),oldEvent=alarm(c,8);int calls=c.alarms.exactCalls;
+   c.prefs.failedCommits=failures;
+   ReminderScheduler.replaceSchedule(c,List.of(event(7,"Uncommitted replacement",second)),full,true);
+   check(before.equals(c.prefs.getString("class_reminder_schedule_encrypted_v1",null)),"failed replacement restores cached payload and generation, failures="+failures+", full="+full);
+   check(c.alarms.exactCalls==calls&&c.alarms.pending.size()==2&&alarm(c,7)==oldCourse&&alarm(c,8)==oldEvent,"failed persistence leaves existing alarms untouched");
+   check(!c.prefs.getBoolean("class_reminder_last_submission_ok",true),"failed replacement remains observable");
+   deliver(c,oldCourse);check(c.notifications.count==1&&c.alarms.times.get(7)==second,"old course still delivers and continues after commit rollback");
+   deliver(c,oldEvent);check(c.notifications.count==2&&"Retained event".equals(c.notifications.last.title),"old event still delivers after commit rollback");
+  }
+  Context empty=new Context();empty.prefs.failedCommits=1;
+  ReminderScheduler.replaceSchedule(empty,List.of(entry(7,first)));
+  check(empty.prefs.getString("class_reminder_schedule_encrypted_v1",null)==null&&empty.alarms.pending.isEmpty(),"failed initial save does not leave a phantom cached schedule");
+ }
  private static void timingChecks(){
    long now=System.currentTimeMillis(), start=now+300_000L;
    check(ReminderTiming.startAt(now-1_200_000L,25)==start,"start comes from trigger plus lead, not delivery");
@@ -365,11 +431,14 @@ public final class ReminderRegressionTest {
   c=scheduled(7,first,second);c.notificationPermission=-1;c.alarms.simulateSystemCancellation();boot(c,AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED);
   check(c.alarms.times.get(7)==first,"grant restoration independent of notification permission");
   timingChecks();
+  partialRebuildChecks();
+  failedReplacementChecks();
    System.out.println("ReminderRegressionTest: "+checks+" behavioral checks passed (actual scheduler + receivers; Android service doubles).");
  }
 }
 '@
 }
+. (Join-Path $PSScriptRoot 'reminder-diagnostic-test-doubles.ps1')
 $generated = @()
 foreach ($entry in $sources.GetEnumerator()) {
     $path = Join-Path $out $entry.Key
@@ -383,11 +452,13 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 foreach ($entry in $sources.GetEnumerator()) {
     [System.IO.File]::WriteAllText((Join-Path $out $entry.Key), $entry.Value, $utf8)
 }
-$production = @('TimetableRules.java','ReminderScheduler.java','ClassReminderReceiver.java','ReminderBootReceiver.java','PersonalEvent.java','ReminderTiming.java','UiLang.java') |
+$production = @('TimetableRules.java','ReminderScheduler.java','ClassReminderReceiver.java','ReminderBootReceiver.java','ReminderDiagnostics.java','ReminderDiagnosticRules.java','PersonalEvent.java','ReminderTiming.java','UiLang.java','SafePreferences.java','PreferenceTransaction.java') |
     ForEach-Object { Join-Path $root ('app\src\main\java\com\weekweeks\app\' + $_) }
 & $javac -encoding UTF-8 --release 17 -d $out @generated @production
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $java -cp $out com.weekweeks.app.ReminderRegressionTest
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $java -cp $out com.weekweeks.app.ReminderDiagnosticRegressionTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 [xml] $manifest = Get-Content -LiteralPath (Join-Path $root 'app\src\main\AndroidManifest.xml') -Raw
 $ns = New-Object System.Xml.XmlNamespaceManager($manifest.NameTable)

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="event_time_summary">%1$s–%2$s · %3$s</string>
+    <string name="event_time_summary_no_end">%1$s · 未設結束時間</string>
+    <string name="event_time_duration_hours_minutes">%1$d小時%2$d分</string>
+    <string name="event_time_duration_hours">%1$d小時</string>
+    <string name="event_time_duration_minutes">%1$d分鐘</string>
+    <string name="event_time_error_start_required">請填寫開始時間</string>
+    <string name="event_time_error_start_invalid">開始時間無效，請輸入 00:00–23:59 範圍內的時間</string>
+    <string name="event_time_error_end_invalid">結束時間無效，請輸入 00:00–23:59 範圍內的時間</string>
+    <string name="event_time_error_order">結束時間需晚於開始時間，且在當天內</string>
+</resources>

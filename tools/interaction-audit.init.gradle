@@ -1,0 +1,10 @@
+// Read-only interaction probes, isolated from production and pastel data.
+gradle.beforeProject { project ->
+    project.pluginManager.withPlugin('com.android.application') {
+        project.androidComponents.finalizeDsl { android ->
+            android.defaultConfig.applicationId = 'com.weekweeks.app.audit'
+            android.defaultConfig.testInstrumentationRunner = 'com.weekweeks.app.InteractionAuditDeviceTest'
+            android.sourceSets.main.assets.setSrcDirs([])
+        }
+    }
+}

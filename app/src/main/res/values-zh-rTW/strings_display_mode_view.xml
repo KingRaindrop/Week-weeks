@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="display_mode_agenda_hint">週視圖按起止時間排列日程；短日程或未設結束時間時保留最小顯示高度。點按查看詳情，點 ＋ 新增。</string>
+    <string name="display_mode_agenda_empty">這一週還沒有日程，可新增安排。</string>
+    <string name="display_mode_event_add_on_day">為%1$s新增日程</string>
+    <string name="display_mode_course_outside_empty">本週在學期外，沒有課程。</string>
+    <string name="display_mode_course_outside_hint">學期外不排課程，可選擇學期內的日期查看課表。</string>
+    <string name="display_mode_course_outside_cell">%1$s，學期外沒有課程</string>
+    <string name="display_mode_mine_courses_only">目前僅顯示課程，可在設定中切換顯示內容。</string>
+</resources>

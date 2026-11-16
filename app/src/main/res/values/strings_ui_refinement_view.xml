@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_refinement_layout_week">周视图</string>
+    <string name="ui_refinement_layout_list">列表</string>
+    <string name="ui_refinement_mode_courses">课程</string>
+    <string name="ui_refinement_mode_agenda">日程</string>
+    <string name="ui_refinement_mode_combined">综合</string>
+    <string name="ui_refinement_content_mode">显示内容：%1$s</string>
+    <string name="ui_refinement_group_count_many">99+</string>
+</resources>

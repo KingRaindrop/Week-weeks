@@ -9,7 +9,8 @@
 | [hero.svg](<hero.svg>) | Original vector artwork: ad-free, offline, no account required. The small grid is an illustration, not an app screenshot. |
 | [timetable.png](<timetable.png>) | Real app screenshot of the weekly timetable, using fictional demo courses. |
 | [agenda.png](<agenda.png>) | Real app screenshot of the agenda, using fictional demo courses and personal events. |
-| [appearance.png](<appearance.png>) | Real app screenshot of the interface tone picker with 16 accent choices. |
+| [appearance.png](<appearance.png>) | Earlier app screenshot of the tone picker with 16 choices; the current source offers 22 accent choices. |
+| [ui-refinement/](<ui-refinement/>) | November 16, 2026 audit screenshots: grouped settings, restored scroll position, live time feedback and a crowded agenda at large font sizes. |
 
 三份 README 共用同一套图片，正文、替代文字和说明分别本地化。英文截图用于跨语言展示，并不表示应用只支持英文。应用支持简体中文、繁體中文和 English。
 
@@ -17,7 +18,7 @@ All three READMEs share these images, with localized text, alternative text and 
 
 ## 隐私 / Privacy
 
-- 截图应来自独立的 `com.weekweeks.app.readme` 演示安装，不能从真实用户的课表中直接取图。
+- README 首页截图来自独立的 `com.weekweeks.app.readme` 演示安装；`ui-refinement/` 截图来自 `com.weekweeks.app.audit` 测试安装。不能从真实用户的课表中直接取图。
 - 课程名称、教室、校历和个人安排均为虚构示例。图片不是应用内置数据，也不是首次启动时自动添加的课程。
 - 演示包提醒关闭，不申请通知权限；不修改正式包、兼容测试包或更名前旧应用的数据。
 - 禁止把真实课表 PDF、签名配置、密码或教师／学生个人资料放入本目录。
@@ -33,6 +34,8 @@ Screenshots are captured from an isolated demo installation, never a real user's
 5. 检查图片内容、可读性与个人信息；退出或停用独立演示包，再回到原先的正式应用。不要清除正式应用数据。
 
 Build an isolated `.readme` variant, add only fictional data, capture the actual interface, and check the resulting images before publishing. Do not replace real screenshots with fabricated UI or overwrite a production installation to create demo content.
+
+`ui-refinement/` 的复现入口是 [ui-refinement-audit.init.gradle](<../../tools/ui-refinement-audit.init.gradle>)，验收范围见[界面优化记录](<../UI-REFINEMENT-20261116.md>)。这些截图使用虚构事件；字体检查所需的可选字体不随仓库分发。
 
 ## 素材与授权 / Asset and licensing notes
 

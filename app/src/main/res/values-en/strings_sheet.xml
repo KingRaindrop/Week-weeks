@@ -95,7 +95,7 @@
   <string name="sheet_example_copied">Example copied</string>
   <string name="sheet_go_back_edit">Go back</string>
   <string name="sheet_import_paste_sub">If your PDF can\'t be read, format it like the example and paste it</string>
-  <string name="sheet_import_pdf_sub">Reads a timetable PDF exported from your school system</string>
+  <string name="sheet_import_pdf_sub">PDF, or XLSX, CSV, TSV and TXT lists with one course per row</string>
   <string name="sheet_import_title">Import timetable</string>
   <string name="sheet_label_with_sub">%1$s, %2$s</string>
   <string name="sheet_location">Location</string>
@@ -148,7 +148,9 @@
   <string name="sheet_teacher">Teacher</string>
   <string name="sheet_temporary_chip">Temporary · from this week</string>
   <string name="sheet_temporary_unavailable">This week isn\'t a teaching week in the academic calendar, so temporary weeks can\'t be set</string>
+  <string name="sheet_temporary_week_limit">Temporary courses support weeks 1–%1$d. This week is outside that range; existing input is unchanged.</string>
   <string name="sheet_text_badge">TXT</string>
+  <string name="sheet_file_badge">FILE</string>
   <string name="sheet_think_again">Not now</string>
   <string name="sheet_time">Time</string>
   <string name="sheet_time_unset">Time not set</string>

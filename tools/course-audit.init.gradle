@@ -7,7 +7,11 @@ gradle.beforeProject { project ->
     project.pluginManager.withPlugin('com.android.application') {
         project.androidComponents.finalizeDsl { android ->
             android.defaultConfig.applicationId = 'com.weekweeks.app.audit'
-            android.defaultConfig.testInstrumentationRunner = 'com.weekweeks.app.CourseCardDeviceTest'
+            // Focused runners retain the same isolated target; parser checks launch no Activity.
+            android.defaultConfig.testInstrumentationRunner = project.findProperty('darkUiAudit') == 'true'
+                    ? 'com.weekweeks.app.DarkUiDeviceTest'
+                    : project.findProperty('parserAudit') == 'true'
+                    ? 'com.weekweeks.app.ParserDeviceTest' : 'com.weekweeks.app.CourseCardDeviceTest'
             android.sourceSets.main.assets.setSrcDirs([])
         }
     }

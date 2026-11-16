@@ -44,13 +44,15 @@ final class PdfCourseParser {
         final String text;
         final int streamId;
         final boolean verticalText;
+        final boolean requiresDayGrid;
 
-        PdfTextItem(double x, double y, String text, int streamId, boolean verticalText) {
+        PdfTextItem(double x, double y, String text, int streamId, boolean verticalText, boolean requiresDayGrid) {
             this.x = x;
             this.y = y;
             this.text = text;
             this.streamId = streamId;
             this.verticalText = verticalText;
+            this.requiresDayGrid = requiresDayGrid;
         }
     }
 
@@ -59,22 +61,19 @@ final class PdfCourseParser {
         final double y;
         final byte[] bytes;
         final boolean verticalText;
+        final PdfDocumentStreams.UnicodeMap font;
+        final String fontResource;
+        final boolean requiresDayGrid;
 
-        EncodedTextItem(double x, double y, byte[] bytes, boolean verticalText) {
+        EncodedTextItem(double x, double y, byte[] bytes, boolean verticalText,
+                PdfDocumentStreams.UnicodeMap font, String fontResource, boolean requiresDayGrid) {
             this.x = x;
             this.y = y;
             this.bytes = bytes;
             this.verticalText = verticalText;
-        }
-    }
-
-    private static final class PdfLiteral {
-        final byte[] bytes;
-        final int nextIndex;
-
-        PdfLiteral(byte[] bytes, int nextIndex) {
-            this.bytes = bytes;
-            this.nextIndex = nextIndex;
+            this.font = font;
+            this.fontResource = fontResource;
+            this.requiresDayGrid = requiresDayGrid;
         }
     }
 
@@ -124,6 +123,18 @@ final class PdfCourseParser {
         }
 
         List<PdfTextItem> textItems = new ArrayList<>();
+        int decodedTextChars = 0;
+        List<PdfDocumentStreams.Page> pages = PdfDocumentStreams.read(pdfBytes, maxStreamBytes);
+        if (pages != null) {
+            for (PdfDocumentStreams.Page page : pages) {
+                decodedTextChars += parsePdfTextItems(page.content, textItems, page.id,
+                        page.fonts, page.imageObjects, maxStreamBytes - decodedTextChars);
+            }
+            debugLog.append("PDF pages: ").append(pages.size())
+                    .append(", text items: ").append(textItems.size()).append('\n');
+            if (textItems.isEmpty()) throw PdfDocumentStreams.invalid("no text timetable found");
+            return textItems;
+        }
         byte[] streamToken = "stream".getBytes(StandardCharsets.ISO_8859_1);
         byte[] endStreamToken = "endstream".getBytes(StandardCharsets.ISO_8859_1);
         int searchFrom = 0;
@@ -150,7 +161,8 @@ final class PdfCourseParser {
                             "PDF 內容過大，已拒絕匯入", "PDF content is too large to import"));
                 }
                 int beforeCount = textItems.size();
-                parsePdfTextItems(stream, textItems, streamStart);
+                decodedTextChars += parsePdfTextItems(stream, textItems, streamStart,
+                        java.util.Collections.emptyMap(), java.util.Collections.emptySet(), maxStreamBytes - decodedTextChars);
                 int addedCount = textItems.size() - beforeCount;
                 if (addedCount > 0) {
                     streamCount++;
@@ -192,66 +204,139 @@ final class PdfCourseParser {
         }
     }
 
-    private static void parsePdfTextItems(byte[] stream, List<PdfTextItem> textItems, int streamId) {
-        double currentX = 0;
-        double currentY = 0;
-        boolean verticalText = false;
+    private static int parsePdfTextItems(byte[] stream, List<PdfTextItem> textItems, int streamId,
+            Map<String, PdfDocumentStreams.UnicodeMap> fonts, java.util.Set<String> imageObjects,
+            int maxTextChars) throws ImportException {
+        double x = 0, y = 0, a = 1, b = 0, c = 0, d = 1, leading = 0;
+        double[] ctm = {1, 0, 0, 1, 0, 0};
+        List<double[]> graphicsStack = new ArrayList<>();
+        List<PdfDocumentStreams.UnicodeMap> fontStack = new ArrayList<>();
+        List<String> fontResourceStack = new ArrayList<>();
+        List<Double> leadingStack = new ArrayList<>();
+        boolean inText = false;
+        PdfDocumentStreams.UnicodeMap font = null;
+        String fontResource = ""; // Legacy fixtures omit Tf; keep their shared evidence unchanged.
         List<EncodedTextItem> encodedItems = new ArrayList<>();
-        int index = 0;
-        while (index < stream.length) {
-            if (index + 1 < stream.length && stream[index] == 'T' && stream[index + 1] == 'm') {
-                double[] matrix = readLastNumbersBefore(stream, index, 6);
-                if (matrix != null) {
-                    currentX = matrix[4];
-                    currentY = matrix[5];
-                    verticalText = Math.abs(matrix[1]) > Math.abs(matrix[0]);
-                }
-                index += 2;
+        List<Object> operands = new ArrayList<>();
+        PdfDocumentStreams.Scanner scanner = new PdfDocumentStreams.Scanner(stream, 0);
+        while (scanner.hasNext()) {
+            Object token = scanner.next();
+            if (!(token instanceof String)) {
+                operands.add(token);
+                if (operands.size() > 1000) throw PdfDocumentStreams.invalid("too many text operands");
                 continue;
             }
-
-            if (stream[index] == '(') {
-                PdfLiteral literal = readPdfLiteral(stream, index);
-                int afterLiteral = skipWhitespace(stream, literal.nextIndex);
-                if (afterLiteral + 1 < stream.length && stream[afterLiteral] == 'T' && stream[afterLiteral + 1] == 'j') {
-                    encodedItems.add(new EncodedTextItem(currentX, currentY, literal.bytes, verticalText));
-                    index = afterLiteral + 2;
-                    continue;
-                }
-                index = literal.nextIndex;
-                continue;
+            String op = (String) token;
+            if ("Do".equals(op)) {
+                if (operands.size() != 1 || !(operands.get(0) instanceof PdfDocumentStreams.Name)
+                        || !imageObjects.contains(((PdfDocumentStreams.Name) operands.get(0)).value))
+                    throw PdfDocumentStreams.invalid("Form or unknown XObject text is not supported");
+            } else if ("BI".equals(op)) throw PdfDocumentStreams.invalid("inline images are not supported");
+            else if ("q".equals(op)) {
+                if (graphicsStack.size() >= 64) throw PdfDocumentStreams.invalid("graphics stack exceeds limit");
+                graphicsStack.add(ctm.clone()); fontStack.add(font); fontResourceStack.add(fontResource);
+                leadingStack.add(leading);
+            } else if ("Q".equals(op)) {
+                if (graphicsStack.isEmpty()) throw PdfDocumentStreams.invalid("unbalanced graphics stack");
+                ctm = graphicsStack.remove(graphicsStack.size() - 1);
+                font = fontStack.remove(fontStack.size() - 1);
+                fontResource = fontResourceStack.remove(fontResourceStack.size() - 1);
+                leading = leadingStack.remove(leadingStack.size() - 1);
+            } else if ("cm".equals(op)) {
+                double[] matrix = numbers(operands, 6);
+                boolean straight = Math.abs(matrix[1]) < 0.000001 && Math.abs(matrix[2]) < 0.000001;
+                boolean quarterTurn = Math.abs(matrix[0]) < 0.000001 && Math.abs(matrix[3]) < 0.000001;
+                if ((!straight && !quarterTurn) || Math.abs(matrix[0] * matrix[3] - matrix[1] * matrix[2]) < 0.000001)
+                    throw PdfDocumentStreams.invalid("skewed or singular content transformation is not supported");
+                ctm = concatenate(ctm, matrix);
             }
-
-            if (stream[index] == '[') {
-                PdfLiteral arrayText = readPdfTextArray(stream, index);
-                int afterArray = skipWhitespace(stream, arrayText.nextIndex);
-                if (afterArray + 1 < stream.length && stream[afterArray] == 'T' && stream[afterArray + 1] == 'J') {
-                    encodedItems.add(new EncodedTextItem(currentX, currentY, arrayText.bytes, verticalText));
-                    index = afterArray + 2;
-                    continue;
+            if ("BT".equals(op)) { inText = true; x = y = 0; a = d = 1; b = c = 0; }
+            else if ("ET".equals(op)) inText = false;
+            else if ("Tf".equals(op) && operands.size() == 2
+                    && operands.get(0) instanceof PdfDocumentStreams.Name) {
+                fontResource = ((PdfDocumentStreams.Name) operands.get(0)).value;
+                font = fonts.get(fontResource);
+            } else if (inText) {
+                if ("Tm".equals(op)) {
+                    double[] values = numbers(operands, 6);
+                    a = values[0]; b = values[1]; c = values[2]; d = values[3]; x = values[4]; y = values[5];
+                } else if ("Td".equals(op) || "TD".equals(op)) {
+                    double[] values = numbers(operands, 2);
+                    x += a * values[0] + c * values[1]; y += b * values[0] + d * values[1];
+                    if ("TD".equals(op)) leading = -values[1];
+                } else if ("TL".equals(op)) leading = numbers(operands, 1)[0];
+                else if ("T*".equals(op) || "'".equals(op) || "\"".equals(op)) {
+                    x -= c * leading; y -= d * leading;
                 }
-                index = arrayText.nextIndex;
-                continue;
+                if ("Tj".equals(op) || "TJ".equals(op) || "'".equals(op) || "\"".equals(op)) {
+                    Object value = operands.isEmpty() ? null : operands.get(operands.size() - 1);
+                    ByteArrayOutputStream text = new ByteArrayOutputStream();
+                    if ("TJ".equals(op) && value instanceof List) {
+                        for (Object part : (List<?>) value) {
+                            if (part instanceof byte[]) text.write((byte[]) part, 0, ((byte[]) part).length);
+                            else if (!(part instanceof Number)) throw PdfDocumentStreams.invalid("invalid TJ array");
+                        }
+                    } else if (value instanceof byte[]) text.write((byte[]) value, 0, ((byte[]) value).length);
+                    else throw PdfDocumentStreams.invalid("invalid text string operand");
+                    double deviceX = ctm[0] * x + ctm[2] * y + ctm[4];
+                    double deviceY = ctm[1] * x + ctm[3] * y + ctm[5];
+                    boolean vertical = Math.abs(ctm[1] * a + ctm[3] * b) > Math.abs(ctm[0] * a + ctm[2] * b);
+                    double oldDay = Math.abs(b) > Math.abs(a) ? y : x;
+                    double newDay = vertical ? deviceY : deviceX;
+                    encodedItems.add(new EncodedTextItem(deviceX, deviceY, text.toByteArray(), vertical, font,
+                            fontResource, Math.abs(newDay - oldDay) > 0.01));
+                }
             }
-
-            index++;
+            operands.clear();
         }
-        boolean preferUtf16 = hasUtf16TimetableEvidence(encodedItems);
+        java.util.Set<String> utf16Fonts = new java.util.HashSet<>();
         for (EncodedTextItem item : encodedItems) {
-            String text = decodePdfText(item.bytes, preferUtf16).trim();
-            if (!text.isEmpty()) {
-                textItems.add(new PdfTextItem(item.x, item.y, text, streamId, item.verticalText));
-            }
+            if (item.font == null && hasUtf16TimetableEvidence(item.bytes)) utf16Fonts.add(item.fontResource);
         }
+        int decodedChars = 0;
+        for (EncodedTextItem item : encodedItems) {
+            String text = item.font == null ? decodePdfText(item.bytes, utf16Fonts.contains(item.fontResource))
+                    : item.font.decode(item.bytes, maxTextChars - decodedChars);
+            if (text.length() > maxTextChars - decodedChars)
+                throw PdfDocumentStreams.invalid("decoded PDF text exceeds limit");
+            decodedChars += text.length();
+            text = text.trim();
+            if (!text.isEmpty()) textItems.add(new PdfTextItem(item.x, item.y, text, streamId, item.verticalText, item.requiresDayGrid));
+        }
+        return decodedChars;
     }
 
-    private static List<ParsedCourse> coursesFromPdfItems(List<PdfTextItem> items, int maxPeriods, int maxCourses, StringBuilder debugLog) {
+    private static double[] concatenate(double[] left, double[] right) throws ImportException {
+        double[] result = {
+                left[0] * right[0] + left[2] * right[1], left[1] * right[0] + left[3] * right[1],
+                left[0] * right[2] + left[2] * right[3], left[1] * right[2] + left[3] * right[3],
+                left[0] * right[4] + left[2] * right[5] + left[4],
+                left[1] * right[4] + left[3] * right[5] + left[5]};
+        for (double value : result) if (!Double.isFinite(value)) throw PdfDocumentStreams.invalid("nonfinite content transformation");
+        return result;
+    }
+
+    private static double[] numbers(List<Object> operands, int count) throws ImportException {
+        if (operands.size() != count) throw PdfDocumentStreams.invalid("invalid text positioning operands");
+        double[] values = new double[count];
+        for (int i = 0; i < count; i++) {
+            if (!(operands.get(i) instanceof Number)) throw PdfDocumentStreams.invalid("expected positioning number");
+            values[i] = ((Number) operands.get(i)).doubleValue();
+        }
+        return values;
+    }
+
+    private static List<ParsedCourse> coursesFromPdfItems(List<PdfTextItem> items, int maxPeriods, int maxCourses, StringBuilder debugLog) throws ImportException {
         List<ParsedCourse> parsed = new ArrayList<>();
         int matchCount = 0;
         int skipCount = 0;
         Map<Integer, Boolean> rowAxes = inferRowAxes(items, maxPeriods);
+        Map<Integer, DayGrid> dayGrids = inferDayGrids(items);
+        for (Map.Entry<Integer, DayGrid> entry : dayGrids.entrySet()) {
+            rowAxes.put(entry.getKey(), entry.getValue().rowAxis);
+        }
 
-        for (int i = 0; i < items.size() && parsed.size() < maxCourses; i++) {
+        for (int i = 0; i < items.size(); i++) {
             PdfTextItem item = items.get(i);
             TimetableRules.PeriodMatch periodMatch =
                     TimetableRules.matchPeriodWeeks(item.text, maxPeriods);
@@ -261,7 +346,12 @@ final class PdfCourseParser {
 
             matchCount++;
             boolean rowAxis = Boolean.TRUE.equals(rowAxes.get(item.streamId));
-            int day = rowAxis ? dayFromX(item.y) : dayFromX(item.x);
+            DayGrid grid = dayGrids.get(item.streamId);
+            debugLog.append(grid == null ? "weekday-grid: legacy-fallback\n" : "weekday-grid: header-calibrated\n");
+            if (grid == null && item.requiresDayGrid)
+                throw PdfDocumentStreams.invalid("transformed weekday coordinates require clear weekday headers");
+            double dayPosition = rowAxis ? item.y : item.x;
+            int day = grid == null ? dayFromX(dayPosition) : grid.dayAt(dayPosition);
             debugLog.append(String.format(Locale.CHINA, "\n[匹配%d] 文本: %s\n", matchCount, item.text));
             debugLog.append(String.format(Locale.ROOT, "  位置: x=%.2f, y=%.2f\n", item.x, item.y));
             debugLog.append(String.format(Locale.CHINA, "  解析: 星期=%d, 节次=%s-%s, 周次=%s\n",
@@ -312,18 +402,25 @@ final class PdfCourseParser {
                         ""
                 ).trim();
             }
-            course.weeks = cleanField(cleanPdfWeeks(rawWeeks));
+            course.weeks = cleanPdfWeeks(rawWeeks);
             TimetableRules.WeekParseResult weekResult = TimetableRules.parseWeeks(course.weeks);
             if (!weekResult.valid) {
                 debugLog.append("  结果: 上课周格式无法识别，跳过\n");
                 skipCount++;
                 continue;
             }
+            // Validate the whole expression before bounding its stored representation.
+            // Cutting it at 60 characters can silently erase later teaching weeks or
+            // hide an invalid suffix. At most 30 selected weeks fit in compact ranges.
+            if (course.weeks.length() > MAX_FIELD_LENGTH) {
+                course.weeks = compactWeeks(weekResult);
+            }
 
             course.room = cleanField(extractPdfField(block, "/场地:"));
             course.teacher = cleanField(extractPdfField(block, "/教师:"));
 
             if (!course.name.isEmpty()) {
+                if (parsed.size() >= maxCourses) throw PdfDocumentStreams.invalid("course count exceeds import limit");
                 parsed.add(course);
                 debugLog.append(String.format(Locale.CHINA, "  结果: 成功添加 - %s (%s 第%d-%d节 %s)\n",
                     course.name, DAYS[course.day], course.period, course.endPeriod, course.weeks));
@@ -333,6 +430,20 @@ final class PdfCourseParser {
         debugLog.append(String.format(Locale.CHINA, "\n总结: 匹配到%d个，成功%d个，跳过%d个\n", matchCount, parsed.size(), skipCount));
 
         return parsed;
+    }
+
+    private static String compactWeeks(TimetableRules.WeekParseResult parsed) {
+        if (!parsed.explicit) return "";
+        StringBuilder result = new StringBuilder();
+        for (int week = 1; week <= TimetableRules.MAX_WEEK; week++) {
+            if (!parsed.weeks[week]) continue;
+            int start = week;
+            while (week < TimetableRules.MAX_WEEK && parsed.weeks[week + 1]) week++;
+            if (result.length() > 0) result.append(',');
+            result.append(start);
+            if (week > start) result.append('-').append(week);
+        }
+        return result.toString();
     }
 
     private static String cleanPdfWeeks(String rawWeeks) {
@@ -458,9 +569,11 @@ final class PdfCourseParser {
     private static boolean looksLikeCourseNameLine(String text) {
         String value = text.trim();
         return !value.isEmpty()
+                && weekdayHeader(value) < 0
                 && !value.contains("/")
                 && !value.startsWith(":")
                 && !value.startsWith("：")
+                && !value.matches("^(?:学分|學分|分|教学班|教學班|考核方式)[:：].*")
                 && !value.contains("节)")
                 && !value.contains("节）")
                 && !value.matches(".*第\\d{1,2}-?\\d{0,2}节.*") // 排除包含"第X节"的行
@@ -542,6 +655,67 @@ final class PdfCourseParser {
         return false;
     }
 
+    private static final class DayGrid {
+        final double first, step;
+        final boolean rowAxis;
+        DayGrid(double first, double step, boolean rowAxis) {
+            this.first = first; this.step = step; this.rowAxis = rowAxis;
+        }
+        int dayAt(double position) {
+            int day = (int) Math.round((position - first) / step);
+            if (day < 0 || day >= DAYS.length) return -1;
+            return Math.abs(position - first - day * step) <= Math.abs(step) * 0.49 ? day : -1;
+        }
+    }
+
+    private static Map<Integer, DayGrid> inferDayGrids(List<PdfTextItem> items) {
+        Map<Integer, List<PdfTextItem>> headers = new HashMap<>();
+        for (PdfTextItem item : items) {
+            if (weekdayHeader(item.text) >= 0) {
+                List<PdfTextItem> page = headers.get(item.streamId);
+                if (page == null) { page = new ArrayList<>(); headers.put(item.streamId, page); }
+                page.add(item);
+            }
+        }
+        Map<Integer, DayGrid> grids = new HashMap<>();
+        for (Map.Entry<Integer, List<PdfTextItem>> page : headers.entrySet()) {
+            DayGrid columns = fitDayGrid(page.getValue(), false);
+            DayGrid rows = fitDayGrid(page.getValue(), true);
+            // Ambiguous/disagreeing header layouts retain the established legacy grid.
+            if ((columns == null) != (rows == null)) grids.put(page.getKey(), columns != null ? columns : rows);
+        }
+        return grids;
+    }
+
+    private static DayGrid fitDayGrid(List<PdfTextItem> headers, boolean rowAxis) {
+        if (headers.size() < 2) return null;
+        PdfTextItem first = headers.get(0), second = null;
+        int firstDay = weekdayHeader(first.text);
+        for (PdfTextItem item : headers) if (weekdayHeader(item.text) != firstDay) { second = item; break; }
+        if (second == null) return null;
+        double firstPosition = rowAxis ? first.y : first.x;
+        double secondPosition = rowAxis ? second.y : second.x;
+        double step = (secondPosition - firstPosition) / (weekdayHeader(second.text) - firstDay);
+        if (Math.abs(step) < 15 || Math.abs(step) > 500) return null;
+        double origin = firstPosition - firstDay * step;
+        double baseline = rowAxis ? first.x : first.y;
+        for (PdfTextItem item : headers) {
+            double position = rowAxis ? item.y : item.x;
+            double cross = rowAxis ? item.x : item.y;
+            if (Math.abs(position - origin - weekdayHeader(item.text) * step) > 3
+                    || Math.abs(cross - baseline) > 3) return null;
+        }
+        return new DayGrid(origin, step, rowAxis);
+    }
+
+    private static int weekdayHeader(String text) {
+        String value = text.replaceAll("\\s+", "");
+        String day = value.replaceFirst("^(?:星期|礼拜|禮拜|周|週)", "");
+        if (day.equals(value) || day.length() != 1) return -1;
+        int result = "一二三四五六日".indexOf(day);
+        return result < 0 && "天".equals(day) ? 6 : result;
+    }
+
     private static int dayFromX(double x) {
         int day = (int) Math.round((x - DAY_FIRST_COLUMN_X) / DAY_COLUMN_WIDTH);
         if (day < 0 || day >= DAYS.length) {
@@ -564,155 +738,13 @@ final class PdfCourseParser {
         return block.substring(start, end).trim();
     }
 
-    private static PdfLiteral readPdfLiteral(byte[] stream, int startIndex) {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        int depth = 1;
-        int index = startIndex + 1;
-        while (index < stream.length && depth > 0) {
-            int value = stream[index] & 0xff;
-            if (value == '\\') {
-                index++;
-                if (index >= stream.length) {
-                    break;
-                }
-                int escaped = stream[index] & 0xff;
-                switch (escaped) {
-                    case 'n':
-                        output.write('\n');
-                        index++;
-                        break;
-                    case 'r':
-                        output.write('\r');
-                        index++;
-                        break;
-                    case 't':
-                        output.write('\t');
-                        index++;
-                        break;
-                    case 'b':
-                        output.write('\b');
-                        index++;
-                        break;
-                    case 'f':
-                        output.write('\f');
-                        index++;
-                        break;
-                    case '(':
-                    case ')':
-                    case '\\':
-                        output.write(escaped);
-                        index++;
-                        break;
-                    case '\r':
-                        index++;
-                        if (index < stream.length && stream[index] == '\n') {
-                            index++;
-                        }
-                        break;
-                    case '\n':
-                        index++;
-                        break;
-                    default:
-                        if (escaped >= '0' && escaped <= '7') {
-                            int octal = escaped - '0';
-                            index++;
-                            for (int i = 0; i < 2 && index < stream.length; i++) {
-                                int digit = stream[index] & 0xff;
-                                if (digit < '0' || digit > '7') {
-                                    break;
-                                }
-                                octal = octal * 8 + digit - '0';
-                                index++;
-                            }
-                            output.write(octal & 0xff);
-                        } else {
-                            output.write(escaped);
-                            index++;
-                        }
-                        break;
-                }
-            } else if (value == '(') {
-                depth++;
-                output.write(value);
-                index++;
-            } else if (value == ')') {
-                depth--;
-                if (depth > 0) {
-                    output.write(value);
-                }
-                index++;
-            } else {
-                output.write(value);
-                index++;
-            }
-        }
-        return new PdfLiteral(output.toByteArray(), index);
-    }
-
-    private static PdfLiteral readPdfTextArray(byte[] stream, int startIndex) {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        int index = startIndex + 1;
-        while (index < stream.length) {
-            int value = stream[index] & 0xff;
-            if (value == ']') {
-                index++;
-                break;
-            }
-            if (value == '(') {
-                PdfLiteral literal = readPdfLiteral(stream, index);
-                output.write(literal.bytes, 0, literal.bytes.length);
-                index = literal.nextIndex;
-                continue;
-            }
-            if (value == '<' && index + 1 < stream.length && stream[index + 1] != '<') {
-                PdfLiteral hex = readPdfHexString(stream, index);
-                output.write(hex.bytes, 0, hex.bytes.length);
-                index = hex.nextIndex;
-                continue;
-            }
-            index++;
-        }
-        return new PdfLiteral(output.toByteArray(), index);
-    }
-
-    private static PdfLiteral readPdfHexString(byte[] stream, int startIndex) {
-        ByteArrayOutputStream hex = new ByteArrayOutputStream();
-        int index = startIndex + 1;
-        while (index < stream.length) {
-            int value = stream[index] & 0xff;
-            if (value == '>') {
-                index++;
-                break;
-            }
-            if (isHexByte(value)) {
-                hex.write(value);
-            }
-            index++;
-        }
-
-        byte[] hexBytes = hex.toByteArray();
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        for (int i = 0; i < hexBytes.length; i += 2) {
-            int high = hexValue(hexBytes[i]);
-            int low = i + 1 < hexBytes.length ? hexValue(hexBytes[i + 1]) : 0;
-            output.write(((high << 4) | low) & 0xff);
-        }
-        return new PdfLiteral(output.toByteArray(), index);
-    }
-
-    private static boolean hasUtf16TimetableEvidence(List<EncodedTextItem> items) {
-        for (EncodedTextItem item : items) {
-            if (utf16BomCharset(item.bytes) != null) {
-                return true;
-            }
-            // Text that is not clean UTF-8 but is clean, readable UTF-16BE marks the whole
-            // stream as UTF-16, so short names whose UTF-16 bytes look like ASCII decode correctly.
-            if (isEvenLength(item.bytes) && strictDecode(item.bytes, 0, StandardCharsets.UTF_8) == null) {
-                String utf16 = strictDecode(item.bytes, 0, StandardCharsets.UTF_16BE);
-                if (utf16 != null && hasReadableText(utf16)) {
-                    return true;
-                }
-            }
+    private static boolean hasUtf16TimetableEvidence(byte[] bytes) {
+        if (utf16BomCharset(bytes) != null) return true;
+        // Share evidence only within one Tf resource on this page. A CJK font's UTF-16
+        // bytes must not reinterpret even-length Latin text from another font as CJK.
+        if (isEvenLength(bytes) && strictDecode(bytes, 0, StandardCharsets.UTF_8) == null) {
+            String utf16 = strictDecode(bytes, 0, StandardCharsets.UTF_16BE);
+            return utf16 != null && hasReadableText(utf16);
         }
         return false;
     }
@@ -770,7 +802,7 @@ final class PdfCourseParser {
     }
 
     /** Decodes without replacement; returns null for malformed input or control characters. */
-    private static String strictDecode(byte[] bytes, int offset, Charset charset) {
+    static String strictDecode(byte[] bytes, int offset, Charset charset) {
         String text;
         try {
             text = charset.newDecoder()
@@ -800,68 +832,6 @@ final class PdfCourseParser {
             }
         }
         return false;
-    }
-
-    private static double[] readLastNumbersBefore(byte[] data, int operatorIndex, int count) {
-        double[] numbers = new double[count];
-        int found = 0;
-        int index = operatorIndex - 1;
-        while (found < count && index >= 0) {
-            while (index >= 0 && isWhitespace(data[index])) {
-                index--;
-            }
-            int end = index + 1;
-            while (index >= 0 && isNumberByte(data[index])) {
-                index--;
-            }
-            int start = index + 1;
-            if (start >= end) {
-                return null;
-            }
-            try {
-                String token = new String(data, start, end - start, StandardCharsets.ISO_8859_1);
-                numbers[count - found - 1] = Double.parseDouble(token);
-                found++;
-            } catch (NumberFormatException error) {
-                return null;
-            }
-        }
-        return found == count ? numbers : null;
-    }
-
-    private static boolean isNumberByte(byte value) {
-        return (value >= '0' && value <= '9') || value == '-' || value == '+' || value == '.';
-    }
-
-    private static boolean isHexByte(int value) {
-        return (value >= '0' && value <= '9')
-                || (value >= 'a' && value <= 'f')
-                || (value >= 'A' && value <= 'F');
-    }
-
-    private static int hexValue(byte value) {
-        if (value >= '0' && value <= '9') {
-            return value - '0';
-        }
-        if (value >= 'a' && value <= 'f') {
-            return value - 'a' + 10;
-        }
-        if (value >= 'A' && value <= 'F') {
-            return value - 'A' + 10;
-        }
-        return 0;
-    }
-
-    private static boolean isWhitespace(byte value) {
-        return value == ' ' || value == '\n' || value == '\r' || value == '\t' || value == '\f' || value == 0;
-    }
-
-    private static int skipWhitespace(byte[] data, int index) {
-        int cursor = index;
-        while (cursor < data.length && isWhitespace(data[cursor])) {
-            cursor++;
-        }
-        return cursor;
     }
 
     private static int skipPdfLineBreak(byte[] data, int index) {

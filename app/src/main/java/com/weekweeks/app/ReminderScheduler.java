@@ -13,7 +13,9 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 
 final class ReminderScheduler {
@@ -34,19 +36,54 @@ final class ReminderScheduler {
     }
 
     static void replaceSchedule(Context context, List<Entry> entries) {
+        replaceSchedule(context, entries, true, true);
+    }
+
+    /** A locked data store is unknown, not empty: retain its last readable reminder plan. */
+    static void replaceSchedule(Context context, List<Entry> entries,
+            boolean coursesReadable, boolean eventsReadable) {
+        if (!coursesReadable && !eventsReadable) return;
         ScheduleData previous = loadSchedule(context);
+        if ((!coursesReadable || !eventsReadable) && previous.generation == Long.MIN_VALUE) {
+            // A partial rebuild cannot safely replace an unreadable mixed schedule.
+            recordSubmissionResult(context, ReminderDiagnosticRules.Code.STORE_FAILED);
+            return;
+        }
+        List<Entry> combined = new ArrayList<>();
+        Set<Integer> usedCodes = new HashSet<>();
+        for (Entry entry : previous.entries) {
+            if (!readable(entry, coursesReadable, eventsReadable)) {
+                combined.add(entry);
+                usedCodes.add(entry.requestCode);
+            }
+        }
+        for (Entry entry : entries) {
+            if (!readable(entry, coursesReadable, eventsReadable)) continue;
+            int requestCode = entry.requestCode;
+            while (usedCodes.contains(requestCode)) {
+                requestCode = requestCode == Integer.MAX_VALUE ? 1 : requestCode + 1;
+            }
+            usedCodes.add(requestCode);
+            combined.add(requestCode == entry.requestCode ? entry : new Entry(requestCode,
+                    entry.name, entry.time, entry.room, entry.leadMinutes, entry.triggerTimes, entry.kind));
+        }
         long generation = nextGeneration(previous.generation);
-        ScheduleData replacement = new ScheduleData(generation, entries);
+        ScheduleData replacement = new ScheduleData(generation, combined);
         if (!saveSchedule(context, replacement)) {
-            recordSubmissionResult(context, false);
+            recordSubmissionResult(context, ReminderDiagnosticRules.Code.STORE_FAILED);
             return;
         }
         cancelEntries(context, previous.entries);
-        boolean submitted = true;
-        for (Entry entry : entries) {
-            submitted &= scheduleFirstFuture(context, entry, System.currentTimeMillis(), generation);
+        ReminderDiagnosticRules.Code result = ReminderDiagnosticRules.Code.NO_FUTURE;
+        for (Entry entry : combined) {
+            result = ReminderDiagnosticRules.mergeSchedule(result,
+                    scheduleFirstFuture(context, entry, System.currentTimeMillis(), generation));
         }
-        recordSubmissionResult(context, submitted);
+        recordSubmissionResult(context, result);
+    }
+
+    private static boolean readable(Entry entry, boolean coursesReadable, boolean eventsReadable) {
+        return KIND_EVENT.equals(entry.kind) ? eventsReadable : coursesReadable;
     }
 
     static boolean notificationsEnabled(Context context) {
@@ -56,37 +93,54 @@ final class ReminderScheduler {
 
     static void rescheduleStored(Context context) {
         if (!notificationsEnabled(context)) {
+            ReminderDiagnostics.recordSchedule(context, ReminderDiagnosticRules.Code.APP_REMINDERS_OFF);
             return;
         }
         ScheduleData schedule = loadSchedule(context);
-        long now = System.currentTimeMillis();
-        boolean submitted = true;
-        for (Entry entry : schedule.entries) {
-            submitted &= scheduleFirstFuture(context, entry, now, schedule.generation);
+        if (schedule.generation == Long.MIN_VALUE) {
+            recordSubmissionResult(context, ReminderDiagnosticRules.Code.STORE_FAILED);
+            return;
         }
-        recordSubmissionResult(context, submitted);
+        long now = System.currentTimeMillis();
+        ReminderDiagnosticRules.Code result = ReminderDiagnosticRules.Code.NO_FUTURE;
+        for (Entry entry : schedule.entries) {
+            result = ReminderDiagnosticRules.mergeSchedule(result,
+                    scheduleFirstFuture(context, entry, now, schedule.generation));
+        }
+        recordSubmissionResult(context, result);
     }
 
     // Returns whether this delivery is current and may notify, not whether a later alarm exists.
     // A course's final occurrence must still notify, even if there is nothing left to schedule.
     static boolean scheduleNextFromBroadcast(Context context, Intent deliveredIntent) {
-        if (deliveredIntent == null || !notificationsEnabled(context)
-                || !deliveredIntent.hasExtra(EXTRA_REQUEST_CODE)
+        if (!notificationsEnabled(context)) {
+            ReminderDiagnostics.recordReceive(context, ReminderDiagnosticRules.Code.APP_REMINDERS_OFF);
+            return false;
+        }
+        if (deliveredIntent == null || !deliveredIntent.hasExtra(EXTRA_REQUEST_CODE)
                 || !deliveredIntent.hasExtra(EXTRA_GENERATION)) {
+            ReminderDiagnostics.recordReceive(context, ReminderDiagnosticRules.Code.RECEIVE_INVALID);
             return false;
         }
         int requestCode = deliveredIntent.getIntExtra(EXTRA_REQUEST_CODE, 0);
         long generation = deliveredIntent.getLongExtra(EXTRA_GENERATION, Long.MIN_VALUE);
         ScheduleData current = loadSchedule(context);
+        if (current.generation == Long.MIN_VALUE) {
+            ReminderDiagnostics.recordReceive(context, ReminderDiagnosticRules.Code.STORE_FAILED);
+            return false;
+        }
         if (generation == Long.MIN_VALUE || generation != current.generation) {
+            ReminderDiagnostics.recordReceive(context, ReminderDiagnosticRules.Code.RECEIVE_STALE);
             return false;
         }
         Entry entry = current.entryForRequestCode(requestCode);
         if (entry == null) {
+            ReminderDiagnostics.recordReceive(context, ReminderDiagnosticRules.Code.RECEIVE_UNKNOWN_ENTRY);
             return false;
         }
+        ReminderDiagnostics.recordReceive(context, ReminderDiagnosticRules.Code.RECEIVE_ACCEPTED);
         long deliveredAt = deliveredIntent.getLongExtra(EXTRA_TRIGGER_AT, 0L);
-        boolean submitted = scheduleFirstFuture(
+        ReminderDiagnosticRules.Code submitted = scheduleFirstFuture(
                 context,
                 entry,
                 Math.max(System.currentTimeMillis(), deliveredAt),
@@ -111,11 +165,12 @@ final class ReminderScheduler {
                     .commit();
         }
         cancelEntries(context, previous.entries);
-        recordSubmissionResult(context, saved);
+        recordSubmissionResult(context, saved ? ReminderDiagnosticRules.Code.NO_FUTURE : ReminderDiagnosticRules.Code.STORE_FAILED);
     }
 
     static Status status(Context context) {
-        List<Entry> entries = loadSchedule(context).entries;
+        ScheduleData stored = loadSchedule(context);
+        List<Entry> entries = stored.entries;
         long now = System.currentTimeMillis();
         long nextTriggerAt = -1L;
         int pendingCourses = 0;
@@ -137,7 +192,8 @@ final class ReminderScheduler {
                 nextTriggerAt,
                 submissionOk,
                 submittedAt,
-                canScheduleExactAlarms(context)
+                canScheduleExactAlarms(context),
+                stored.generation != Long.MIN_VALUE
         );
     }
 
@@ -165,41 +221,40 @@ final class ReminderScheduler {
         }
     }
 
-    private static boolean scheduleFirstFuture(
+    private static ReminderDiagnosticRules.Code scheduleFirstFuture(
             Context context,
             Entry entry,
             long afterMillis,
             long generation
     ) {
         long triggerAt = TimetableRules.nextTriggerAfter(entry.triggerTimes, afterMillis);
-        if (triggerAt <= 0L) {
-            return true;
-        }
-
+        if (triggerAt <= 0L) return ReminderDiagnosticRules.Code.NO_FUTURE;
         AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        if (alarmManager == null) {
-            return false;
-        }
-        Intent intent = entry.toIntent(context, generation);
-        intent.putExtra(EXTRA_TRIGGER_AT, triggerAt);
-        long startAt = ReminderTiming.startAt(triggerAt, entry.leadMinutes);
-        intent.putExtra(ClassReminderReceiver.EXTRA_START_AT, startAt);
-        intent.putExtra(ClassReminderReceiver.EXTRA_END_AT, ReminderTiming.endAt(startAt, entry.time));
-        PendingIntent pendingIntent = PendingIntent.getBroadcast(
-                context,
-                entry.requestCode,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-        );
+        if (alarmManager == null) return ReminderDiagnosticRules.Code.ALARM_UNAVAILABLE;
         try {
+            Intent intent = entry.toIntent(context, generation);
+            intent.putExtra(EXTRA_TRIGGER_AT, triggerAt);
+            long startAt = ReminderTiming.startAt(triggerAt, entry.leadMinutes);
+            intent.putExtra(ClassReminderReceiver.EXTRA_START_AT, startAt);
+            intent.putExtra(ClassReminderReceiver.EXTRA_END_AT, ReminderTiming.endAt(startAt, entry.time));
+            PendingIntent pendingIntent = PendingIntent.getBroadcast(context, entry.requestCode, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             if (canScheduleExactAlarms(context)) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent);
-            } else {
-                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent);
+                try {
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent);
+                    return ReminderDiagnosticRules.Code.SCHEDULE_EXACT;
+                } catch (SecurityException permissionChanged) {
+                    // Permission may change between inspection and submission; retain a real fallback.
+                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent);
+                    return ReminderDiagnosticRules.Code.SCHEDULE_INEXACT;
+                }
             }
-            return true;
-        } catch (RuntimeException ignored) {
-            return false;
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent);
+            return ReminderDiagnosticRules.Code.SCHEDULE_INEXACT;
+        } catch (SecurityException denied) {
+            return ReminderDiagnosticRules.Code.SCHEDULE_SECURITY_ERROR;
+        } catch (RuntimeException failed) {
+            return ReminderDiagnosticRules.Code.SCHEDULE_ERROR;
         }
     }
 
@@ -208,16 +263,18 @@ final class ReminderScheduler {
             return true;
         }
         AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        return alarmManager != null && alarmManager.canScheduleExactAlarms();
+        try { return alarmManager != null && alarmManager.canScheduleExactAlarms(); }
+        catch (RuntimeException unavailable) { return false; }
     }
 
     @SuppressLint("ApplySharedPref") // BroadcastReceiver 路径下进程可能被回收，必须同步落盘
-    private static void recordSubmissionResult(Context context, boolean success) {
+    private static void recordSubmissionResult(Context context, ReminderDiagnosticRules.Code result) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
-                .putBoolean(LAST_SUBMISSION_OK_KEY, success)
+                .putBoolean(LAST_SUBMISSION_OK_KEY, ReminderDiagnosticRules.scheduleSucceeded(result))
                 .putLong(LAST_SUBMISSION_AT_KEY, System.currentTimeMillis())
                 .commit();
+        ReminderDiagnostics.recordSchedule(context, result);
     }
 
     private static boolean saveSchedule(Context context, ScheduleData schedule) {
@@ -230,10 +287,11 @@ final class ReminderScheduler {
             payload.put("generation", schedule.generation);
             payload.put("entries", array);
             String encrypted = STORAGE.encrypt(payload.toString());
-            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putString(STORE_KEY, encrypted)
-                    .commit();
+            // A failed SharedPreferences commit still changes its in-memory cache.
+            // Restore the previous generation too, otherwise unchanged pending alarms
+            // would be rejected as stale after this method reports a save failure.
+            return SafePreferences.commit(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
+                    new PreferenceTransaction().put(STORE_KEY, encrypted));
         } catch (Exception ignored) {
             return false;
         }
@@ -358,19 +416,22 @@ final class ReminderScheduler {
         final boolean submissionOk;
         final long submittedAt;
         final boolean exactAlarmAllowed;
+        final boolean scheduleReadable;
 
         Status(
                 int pendingCourses,
                 long nextTriggerAt,
                 boolean submissionOk,
                 long submittedAt,
-                boolean exactAlarmAllowed
+                boolean exactAlarmAllowed,
+                boolean scheduleReadable
         ) {
             this.pendingCourses = pendingCourses;
             this.nextTriggerAt = nextTriggerAt;
             this.submissionOk = submissionOk;
             this.submittedAt = submittedAt;
             this.exactAlarmAllowed = exactAlarmAllowed;
+            this.scheduleReadable = scheduleReadable;
         }
     }
 

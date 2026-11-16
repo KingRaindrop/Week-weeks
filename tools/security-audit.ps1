@@ -79,7 +79,9 @@ if ($failures.Count -eq 0) {
     Assert-Contains "SecureStorage.java" $secureStorage 'setRandomizedEncryptionRequired\(true\)'
     Assert-Contains "MainActivity.java" $activity 'new SecureStorage\('
     Assert-Contains "MainActivity.java" $activity 'courses_encrypted_v2'
-    Assert-Contains "MainActivity.java" $activity '\.commit\(\)'
+    Assert-Contains "MainActivity.java" $activity 'SafePreferences\.commit\('
+    $safePreferences = Get-Content -LiteralPath (Join-Path $root "app/src/main/java/com/weekweeks/app/SafePreferences.java") -Raw -Encoding UTF8
+    Assert-Contains "SafePreferences.java" $safePreferences 'return editor\.commit\(\)'
     Assert-Contains "MainActivity.java" $activity 'storageLocked'
     Assert-Contains "MainActivity.java" $activity 'InputFilter\.LengthFilter'
     Assert-Contains "MainActivity.java" $activity 'MAX_COURSES'
@@ -87,7 +89,16 @@ if ($failures.Count -eq 0) {
     Assert-Contains "MainActivity.java" $activity 'MAX_PDF_BYTES'
     # 在线校历导入已移除：不允许再出现任何联网代码
     Assert-NotContains "MainActivity.java" $activity 'HttpURLConnection|java\.net\.URL|importAcademicCalendarOnline|fetchAcademicCalendar'
-    Assert-Contains "MainActivity.java" $activity 'PdfCourseParser\.parseCourses'
+    Assert-Contains "MainActivity.java" $activity 'TimetableFileParser\.parse'
+    $fileParser = Get-Content -LiteralPath (Join-Path $root "app/src/main/java/com/weekweeks/app/TimetableFileParser.java") -Raw -Encoding UTF8
+    $xlsxParser = Get-Content -LiteralPath (Join-Path $root "app/src/main/java/com/weekweeks/app/XlsxTimetableParser.java") -Raw -Encoding UTF8
+    Assert-Contains "TimetableFileParser.java" $fileParser 'PdfCourseParser\.parseCourses'
+    Assert-Contains "TimetableFileParser.java" $fileParser 'XlsxTimetableParser\.parse'
+    Assert-Contains "XlsxTimetableParser.java" $xlsxParser 'MAX_TOTAL_BYTES'
+    Assert-Contains "XlsxTimetableParser.java" $xlsxParser 'CodingErrorAction\.REPORT'
+    Assert-Contains "XlsxTimetableParser.java" $xlsxParser 'StringReader\(raw\)'
+    Assert-Contains "XlsxTimetableParser.java" $xlsxParser 'external-general-entities", false'
+    Assert-Contains "XlsxTimetableParser.java" $xlsxParser 'external-parameter-entities", false'
     Assert-Contains "MainActivity.java" $activity 'readWithLimit'
     Assert-NotContains "MainActivity.java" $activity 'putString\(COURSES_KEY[^;]*?\.apply\(\)'
     Assert-NotContains "MainActivity.java" $activity 'putString\(COURSES_KEY,\s*array\.toString\(\)\)'
@@ -107,9 +118,15 @@ if ($failures.Count -eq 0) {
     Assert-Contains "ReminderScheduler.java" $reminderScheduler 'reminder_schedule_generation'
     Assert-Contains "ReminderScheduler.java" $reminderScheduler '\.commit\(\)'
     Assert-NotContains "ReminderScheduler.java" $reminderScheduler '\.apply\(\)'
-    if ($reminderReceiver.IndexOf('ReminderScheduler.scheduleNextFromBroadcast') -gt
-            $reminderReceiver.IndexOf('POST_NOTIFICATIONS')) {
-        $failures.Add("ClassReminderReceiver.java must continue the reminder chain before notification permission checks")
+    # Permission diagnostics now live behind postNotification; inspect the actual receiver
+    # dispatch order instead of comparing against a removed POST_NOTIFICATIONS token (-1).
+    $onReceive = [regex]::Match($reminderReceiver, '(?s)public void onReceive\(.*?\n    \}').Value
+    Assert-Contains "ClassReminderReceiver.onReceive" $onReceive 'ReminderScheduler\.scheduleNextFromBroadcast'
+    Assert-Contains "ClassReminderReceiver.onReceive" $onReceive 'postNotification\(context, intent\)'
+    Assert-Contains "ClassReminderReceiver.java" $reminderReceiver 'ReminderDiagnostics\.postBlocker'
+    if ($onReceive.IndexOf('ReminderScheduler.scheduleNextFromBroadcast') -gt
+            $onReceive.IndexOf('postNotification(context, intent)')) {
+        $failures.Add("ClassReminderReceiver.java must continue the reminder chain before notification posting")
     }
 
     Assert-NotContains "project" $allProjectText 'android\.permission\.(READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|QUERY_ALL_PACKAGES|REQUEST_INSTALL_PACKAGES|SYSTEM_ALERT_WINDOW|READ_SMS|SEND_SMS|RECORD_AUDIO|CAMERA|ACCESS_FINE_LOCATION|ACCESS_COARSE_LOCATION)'
@@ -119,8 +136,20 @@ if ($failures.Count -eq 0) {
     Assert-NotContains "project" $allProjectText 'ObjectInputStream|Serializable'
     Assert-NotContains "project" $allProjectText 'TrustManager|HostnameVerifier|setHostnameVerifier'
     Assert-NotContains "project" $allProjectText 'MODE_WORLD_READABLE|MODE_WORLD_WRITEABLE'
-    Assert-NotContains "Java/Kotlin source" $javaKotlinText 'http://'
-    Assert-NotContains "Java/Kotlin source" $javaKotlinText 'https://'
+    # XML namespaces and SAX feature identifiers are not network requests. Keep a narrow
+    # literal allowlist, and independently forbid networking APIs and INTERNET permission.
+    $networkScanText = $javaKotlinText
+    foreach ($xmlIdentifier in @(
+            'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+            'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+            'http://schemas.openxmlformats.org/package/2006/relationships',
+            'http://xml.org/sax/features/external-general-entities',
+            'http://xml.org/sax/features/external-parameter-entities')) {
+        $networkScanText = $networkScanText.Replace($xmlIdentifier, 'urn:local-xml-identifier')
+    }
+    Assert-NotContains "Java/Kotlin source" $javaKotlinText 'java\.net\.(URL|Socket|HttpURLConnection)|okhttp|HttpClient|openConnection\('
+    Assert-NotContains "Java/Kotlin source" $networkScanText 'http://'
+    Assert-NotContains "Java/Kotlin source" $networkScanText 'https://'
 }
 
 if ($failures.Count -gt 0) {

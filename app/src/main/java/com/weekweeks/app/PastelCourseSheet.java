@@ -12,6 +12,7 @@ import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.os.Bundle;
@@ -22,12 +23,15 @@ import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.view.WindowManager;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.core.widget.NestedScrollView;
 
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
@@ -62,27 +66,46 @@ final class PastelCourseSheet {
 
     private final Context context;
     private final boolean dark;
+    private final UiSemanticPalette palette;
     private final int sheetBg, surface, field, ink, muted, line, coral, lavender, danger;
 
+    private final ModalCoordinator coordinator;
+    private ManagedSheet mainDialog;
+    private BottomSheetDialog confirmation;
+    private String confirmationKind;
+    Runnable onDismissed;
+    boolean isShowing() { return mainDialog != null && mainDialog.isShowing(); }
+
     PastelCourseSheet(Context context, boolean dark, PastelAccent theme) {
+        this(context, dark, theme, null);
+    }
+
+    PastelCourseSheet(Context context, boolean dark, PastelAccent theme, ModalCoordinator coordinator) {
+        this.coordinator = coordinator;
         this.context = context;
         this.dark = dark;
         if (theme == null) theme = PastelAccent.classic(dark);
-        sheetBg = color(dark ? "#151B28" : "#F7F8FE");
-        surface = color(dark ? "#1C2433" : "#FFFFFF");
-        field = color(dark ? "#1C2433" : "#FFFFFF");
-        ink = color(dark ? "#F1F3FB" : "#25314D");
-        muted = color(dark ? "#A9B4CB" : "#8A93AA");
-        line = color(dark ? "#303B50" : "#E5E8F2");
-        coral = theme.accent;
+        palette = UiSemanticPalette.of(dark, theme.accent);
+        sheetBg = palette.surface;
+        surface = palette.inset;
+        field = palette.inset;
+        ink = palette.text;
+        muted = palette.secondary;
+        line = palette.divider;
+        coral = palette.accent;
         lavender = theme.tint;
-        danger = color(dark ? "#FF8A80" : "#E5484D");
+        danger = palette.error;
     }
 
     // ---------------------------------------------------------------- details
 
     void showDetail(Detail detail, Runnable onEdit) {
-        BottomSheetDialog dialog = new BottomSheetDialog(context);
+        showDetail(detail, onEdit, null);
+    }
+
+    void showDetail(Detail detail, Runnable onEdit, Runnable onClosed) {
+        BottomSheetDialog dialog = new ManagedSheet(context);
+        dialog.setOnDismissListener(d -> { if (onClosed != null) onClosed.run(); });
         LinearLayout root = sheetRoot();
 
         LinearLayout hero = column();
@@ -123,7 +146,7 @@ final class PastelCourseSheet {
         TextView close = secondaryButton(s(R.string.action_close));
         close.setOnClickListener(v -> dialog.dismiss());
         TextView edit = primaryButton(s(R.string.sheet_edit_course), coral);
-        edit.setOnClickListener(v -> { dialog.dismiss(); if (onEdit != null) onEdit.run(); });
+        edit.setOnClickListener(v -> switchSheet(dialog, onEdit));
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, dp(48), 1);
         cp.rightMargin = dp(10);
         buttons.addView(close, cp);
@@ -165,6 +188,9 @@ final class PastelCourseSheet {
     private EditText[] activeCourseInputs;
     private NestedScrollView activeCourseScroll;
     private String activeCourseInitial;
+    private View activeTemporaryRow;
+    private int[] activeTemporaryCount;
+    private int activeTemporaryWeek;
 
     Bundle captureCourseEditorState() {
         if (activeCourseDialog == null || !activeCourseDialog.isShowing()) return null;
@@ -177,6 +203,10 @@ final class PastelCourseSheet {
         state.putBoolean("colorManuallySelected", activeCourseDraft.colorManuallySelected);
         state.putString("initial", activeCourseInitial);
         state.putInt("scroll", activeCourseScroll.getScrollY());
+        state.putBoolean("temporary_visible", activeTemporaryRow.getVisibility() == View.VISIBLE);
+        state.putInt("temporary_count", activeTemporaryCount[0]);
+        state.putInt("temporary_week", activeTemporaryWeek);
+        captureConfirmation(state);
         for (int i = 0; i < activeCourseInputs.length; i++)
             state.putString("input" + i, activeCourseInputs[i].getText().toString());
         return state;
@@ -211,11 +241,11 @@ final class PastelCourseSheet {
 
         final EditText[] inputs = new EditText[4];
         final BottomSheetDialog[] holder = new BottomSheetDialog[1];
-        BottomSheetDialog dialog = new GuardedBottomSheetDialog(context) {
+        BottomSheetDialog dialog = new ManagedSheet(context) {
             @Override public void cancel() {
                 readInputs(draft, inputs);
                 if (allowClose[0] || snapshot(draft).equals(initial)) { super.cancel(); return; }
-                confirm(s(R.string.sheet_discard_course_title), s(R.string.sheet_discard_message),
+                confirm("discard", s(R.string.sheet_discard_course_title), s(R.string.sheet_discard_message),
                         s(R.string.action_discard_changes), true,
                         () -> { allowClose[0] = true; holder[0].cancel(); });
             }
@@ -302,23 +332,39 @@ final class PastelCourseSheet {
         LinearLayout weekChips = row();
         weekChips.setPadding(0, dp(8), 0, 0);
         weekScroll.addView(weekChips);
-        final int total = Math.max(1, totalWeeks);
+        // Older configurations may exceed the parser's supported range. Never insert invalid weeks.
+        final int total = Math.max(1, Math.min(totalWeeks, TimetableRules.MAX_WEEK));
+        final int temporaryWeek = restoredState == null ? currentWeek
+                : restoredState.getInt("temporary_week", currentWeek);
+        final int[] temporaryCount = {clamp(restoredState == null ? 1
+                : restoredState.getInt("temporary_count", 1), 1, Math.max(1, total - temporaryWeek + 1))};
         LinearLayout tempRow = row();
         // Inserted week text stays in parser syntax (周/单/双) regardless of UI language.
         weekChips.addView(quickChip(s(R.string.sheet_weeks_all_chip, total), v -> setText(inputs[1], "1-" + total + "周")));
         weekChips.addView(quickChip(s(R.string.sheet_odd_weeks), v -> setText(inputs[1], "1-" + total + "周单周")));
-        weekChips.addView(quickChip(s(R.string.sheet_even_weeks), v -> setText(inputs[1], "1-" + total + "周双周")));
-        weekChips.addView(quickChip(s(R.string.sheet_temporary_chip), v -> {
-            if (currentWeek <= 0 || currentWeek > total) {
+        TextView evenWeeks = quickChip(s(R.string.sheet_even_weeks), v -> {
+            if (total >= 2) setText(inputs[1], "1-" + total + "周双周");
+        });
+        evenWeeks.setEnabled(total >= 2);
+        if (total < 2) evenWeeks.setAlpha(0.5f);
+        weekChips.addView(evenWeeks);
+        TextView temporaryChip = quickChip(s(R.string.sheet_temporary_chip), v -> {
+            if (temporaryWeek <= 0 || temporaryWeek > total) {
                 android.widget.Toast.makeText(context, s(R.string.sheet_temporary_unavailable),
                         android.widget.Toast.LENGTH_SHORT).show();
                 return;
             }
             tempRow.setVisibility(tempRow.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
-        }));
+        });
+        temporaryChip.setEnabled(temporaryWeek <= TimetableRules.MAX_WEEK);
+        if (temporaryWeek > TimetableRules.MAX_WEEK) temporaryChip.setAlpha(0.5f);
+        weekChips.addView(temporaryChip);
         form.addView(weekScroll, new LinearLayout.LayoutParams(-1, -2));
-        buildTemporaryRow(tempRow, inputs[1], currentWeek, total);
-        tempRow.setVisibility(View.GONE);
+        if (temporaryWeek > TimetableRules.MAX_WEEK)
+            form.addView(text(s(R.string.sheet_temporary_week_limit, TimetableRules.MAX_WEEK), 11, muted, false));
+        buildTemporaryRow(tempRow, inputs[1], temporaryWeek, total, temporaryCount);
+        tempRow.setVisibility(restoredState != null && restoredState.getBoolean("temporary_visible", false)
+                && temporaryWeek > 0 && temporaryWeek <= total ? View.VISIBLE : View.GONE);
         form.addView(tempRow, new LinearLayout.LayoutParams(-1, -2));
 
         // Room + teacher
@@ -346,16 +392,18 @@ final class PastelCourseSheet {
         form.addView(colorGrid, new LinearLayout.LayoutParams(-1, -2));
 
         // Delete, kept away from the save button to avoid accidental taps.
-        if (editing && deleter != null) {
-            TextView delete = text(s(R.string.sheet_delete_course), 14, danger, true);
+        Runnable requestDelete = editing && deleter != null ? () -> confirm("delete",
+                s(R.string.sheet_delete_course_title),
+                s(R.string.sheet_delete_course_message, nonempty(draft.name, s(R.string.sheet_untitled_course))),
+                s(R.string.action_delete), true, () -> {
+                    if (deleter.delete()) { allowClose[0] = true; dialog.dismiss(); }
+                }) : null;
+        if (requestDelete != null) {
+            TextView delete = text(s(R.string.sheet_delete_course), 14, palette.onErrorContainer, true);
             delete.setGravity(Gravity.CENTER);
             delete.setPadding(0, dp(14), 0, dp(14));
-            delete.setBackground(ripple(dark ? Color.argb(28, 255, 138, 128) : color("#FDEDEE"), 14));
-            delete.setOnClickListener(v -> confirm(s(R.string.sheet_delete_course_title),
-                    s(R.string.sheet_delete_course_message, nonempty(draft.name, s(R.string.sheet_untitled_course))),
-                    s(R.string.action_delete), true, () -> {
-                        if (deleter.delete()) { allowClose[0] = true; dialog.dismiss(); }
-                    }));
+            delete.setBackground(ripple(palette.errorContainer, 14));
+            delete.setOnClickListener(v -> requestDelete.run());
             LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, -2);
             dlp.topMargin = dp(22);
             form.addView(delete, dlp);
@@ -407,6 +455,9 @@ final class PastelCourseSheet {
         activeCourseInputs = inputs;
         activeCourseInitial = initial;
         activeCourseScroll = scroll;
+        activeTemporaryRow = tempRow;
+        activeTemporaryCount = temporaryCount;
+        activeTemporaryWeek = temporaryWeek;
         dialog.setOnDismissListener(d -> {
             if (activeCourseDialog == dialog) {
                 activeCourseDialog = null;
@@ -414,11 +465,14 @@ final class PastelCourseSheet {
                 activeCourseInputs = null;
                 activeCourseScroll = null;
                 activeCourseInitial = null;
+                activeTemporaryRow = null;
+                activeTemporaryCount = null;
             }
             if (onClosed != null) onClosed.run();
         });
         present(dialog, root, false);
         if (restoredState != null) scroll.post(() -> scroll.scrollTo(0, restoredState.getInt("scroll", 0)));
+        restoreEditorConfirmation(restoredState, dialog, requestDelete);
     }
 
     private interface IndexListener { void onIndex(int index); }
@@ -449,11 +503,10 @@ final class PastelCourseSheet {
         return row;
     }
 
-    private void buildTemporaryRow(LinearLayout row, EditText weeks, int currentWeek, int total) {
+    private void buildTemporaryRow(LinearLayout row, EditText weeks, int currentWeek, int total, int[] count) {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(12), dp(8), dp(8), dp(8));
         row.setBackground(round(lavender, 14));
-        final int[] count = {1};
         TextView label = text("", 13, ink, false);
         TextView minus = stepButton("−");
         TextView value = text("1", 15, ink, true);
@@ -513,18 +566,35 @@ final class PastelCourseSheet {
             TextView swatch = text(selected ? "✓" : "", 18, CoursePalette.readableInk(background), true);
             swatch.setGravity(Gravity.CENTER);
             GradientDrawable bg = round(background, 10);
-            bg.setStroke(dp(selected ? 2.5f : 1), selected ? coral : withAlpha(value, 110));
+            bg.setStroke(dp(selected ? 2.5f : 1), selected ? coral : withAlpha(value, dark ? 90 : 110));
             swatch.setBackground(bg);
             swatch.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            cell.addView(swatch, new LinearLayout.LayoutParams(-1, dp(36)));
-            TextView label = text(name, 11, ink, selected);
+            if (dark) {
+                FrameLayout swatchBox = new FrameLayout(context);
+                swatchBox.addView(swatch, new FrameLayout.LayoutParams(-1, -1));
+                View pigmentDot = new View(context);
+                GradientDrawable dotBg = round(value | 0xFF000000, 4);
+                dotBg.setStroke(Math.max(1, dp(0.8f)), Color.argb(90, 0, 0, 0));
+                pigmentDot.setBackground(dotBg);
+                pigmentDot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                FrameLayout.LayoutParams dotLp = new FrameLayout.LayoutParams(dp(8), dp(8), Gravity.TOP | Gravity.END);
+                dotLp.setMargins(0, dp(4), dp(4), 0);
+                swatchBox.addView(pigmentDot, dotLp);
+                cell.addView(swatchBox, new LinearLayout.LayoutParams(-1, dp(36)));
+            } else {
+                cell.addView(swatch, new LinearLayout.LayoutParams(-1, dp(36)));
+            }
+            TextView label = text(name, 11, selected && dark ? coral : ink, selected);
             label.setGravity(Gravity.CENTER);
+            label.setPadding(0, dp(3), 0, 0);
             label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             cell.addView(label, new LinearLayout.LayoutParams(-1, -2));
-            TextView code = text(hex, 9, muted, false);
-            code.setGravity(Gravity.CENTER);
-            code.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            cell.addView(code, new LinearLayout.LayoutParams(-1, -2));
+            if (!dark) {
+                TextView code = text(hex, 9, muted, false);
+                code.setGravity(Gravity.CENTER);
+                code.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                cell.addView(code, new LinearLayout.LayoutParams(-1, -2));
+            }
             lineRow.addView(cell, new LinearLayout.LayoutParams(0, -2, 1));
         }
         if (lineRow != null) {
@@ -536,13 +606,30 @@ final class PastelCourseSheet {
 
     // ---------------------------------------------------------------- confirm
 
-    void confirm(String title, String message, String action, boolean destructive, Runnable onConfirm) {
-        confirmChoice(title, message, action, s(destructive ? R.string.sheet_think_again : R.string.action_cancel), destructive, onConfirm);
+    private void confirm(String kind, String title, String message, String action, boolean destructive, Runnable onConfirm) {
+        confirmChoice(kind, title, message, action, s(destructive ? R.string.sheet_think_again : R.string.action_cancel), destructive, onConfirm);
     }
 
-    private BottomSheetDialog confirmChoice(String title, String message, String action, String cancelLabel,
+    private void captureConfirmation(Bundle state) {
+        if (confirmation != null && confirmation.isShowing()) state.putString("confirmation", confirmationKind);
+    }
+
+    private void restoreEditorConfirmation(Bundle state, BottomSheetDialog dialog, Runnable requestDelete) {
+        if (state == null || !dialog.isShowing()) return;
+        String kind = state.getString("confirmation", "");
+        if ("discard".equals(kind)) dialog.cancel();
+        else if ("delete".equals(kind) && requestDelete != null) requestDelete.run();
+    }
+
+    private BottomSheetDialog confirmChoice(String kind, String title, String message, String action, String cancelLabel,
                                             boolean destructive, Runnable onConfirm) {
+        if (confirmation != null && confirmation.isShowing()) return confirmation;
         BottomSheetDialog dialog = new BottomSheetDialog(context);
+        confirmation = dialog;
+        confirmationKind = kind;
+        dialog.setOnDismissListener(d -> {
+            if (confirmation == dialog) { confirmation = null; confirmationKind = null; }
+        });
         LinearLayout root = sheetRoot();
         LinearLayout body = column();
         body.setPadding(dp(22), dp(4), dp(22), 0);
@@ -557,7 +644,11 @@ final class PastelCourseSheet {
         TextView cancel = secondaryButton(cancelLabel);
         cancel.setOnClickListener(v -> dialog.dismiss());
         TextView ok = primaryButton(action, destructive ? danger : coral);
-        ok.setOnClickListener(v -> { dialog.dismiss(); onConfirm.run(); });
+        ok.setOnClickListener(v -> {
+            if (!dialog.isShowing()) return;
+            dialog.dismiss();
+            onConfirm.run();
+        });
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, dp(48), 1);
         cp.rightMargin = dp(10);
         buttons.addView(cancel, cp);
@@ -569,9 +660,9 @@ final class PastelCourseSheet {
 
     // ---------------------------------------------------------------- import
 
-    /** Lets the user pick PDF import or the paste-text format, which works for any PDF layout. */
+    /** File import and editable list-style text import share the same review flow. */
     void showImportChooser(Runnable onPdf, Runnable onPaste) {
-        BottomSheetDialog dialog = new BottomSheetDialog(context);
+        BottomSheetDialog dialog = new ManagedSheet(context);
         LinearLayout root = sheetRoot();
         LinearLayout body = column();
         body.setPadding(dp(18), dp(2), dp(18), dp(18));
@@ -579,14 +670,12 @@ final class PastelCourseSheet {
         title.setPadding(dp(4), 0, 0, dp(12));
         body.addView(title);
         body.addView(importOption("import", s(R.string.import_pdf_cta), s(R.string.sheet_import_pdf_sub), () -> {
-            dialog.dismiss();
-            onPdf.run();
+            switchSheet(dialog, onPdf);
         }), fieldParams());
         View gap = new View(context);
         body.addView(gap, new LinearLayout.LayoutParams(-1, dp(10)));
         body.addView(importOption("paste", s(R.string.sheet_paste_title), s(R.string.sheet_import_paste_sub), () -> {
-            dialog.dismiss();
-            onPaste.run();
+            switchSheet(dialog, onPaste);
         }), fieldParams());
         root.addView(body, new LinearLayout.LayoutParams(-1, -2));
         present(dialog, root, true);
@@ -600,7 +689,7 @@ final class PastelCourseSheet {
         TextView badge = new TextView(context);
         badge.setBackground(round(lavender, 13));
         badge.setGravity(Gravity.CENTER);
-        badge.setText("import".equals(icon) ? "PDF" : s(R.string.sheet_text_badge));
+        badge.setText(s("import".equals(icon) ? R.string.sheet_file_badge : R.string.sheet_text_badge));
         badge.setTextColor(coral);
         badge.setTextSize(12);
         badge.setTypeface(AppFonts.typeface(context, Typeface.BOLD));
@@ -620,16 +709,37 @@ final class PastelCourseSheet {
     /** Returns null when the pasted text was accepted (dialog closes), otherwise an inline error. */
     interface TextImporter { String submit(String text); }
 
+    private BottomSheetDialog activePasteDialog;
+    private EditText activePasteInput;
+    private NestedScrollView activePasteScroll;
+
+    Bundle capturePasteImportState() {
+        if (activePasteDialog == null || !activePasteDialog.isShowing()) return null;
+        Bundle state = new Bundle();
+        state.putString("text", activePasteInput.getText().toString());
+        state.putInt("selectionStart", activePasteInput.getSelectionStart());
+        state.putInt("selectionEnd", activePasteInput.getSelectionEnd());
+        state.putInt("scroll", activePasteScroll.getScrollY());
+        captureConfirmation(state);
+        return state;
+    }
+
     void showPasteImport(String formatHint, String example, TextImporter importer) {
+        showPasteImport(formatHint, example, importer, null, null, null);
+    }
+
+    /** {@code onAccepted} opens the review window only after this sheet has fully closed. */
+    void showPasteImport(String formatHint, String example, TextImporter importer,
+                         Bundle restoredState, Runnable onClosed, Runnable onAccepted) {
         final EditText[] inputHolder = new EditText[1];
         final boolean[] allowClose = {false};
         final BottomSheetDialog[] holder = new BottomSheetDialog[1];
-        BottomSheetDialog dialog = new GuardedBottomSheetDialog(context) {
+        BottomSheetDialog dialog = new ManagedSheet(context) {
             @Override public void cancel() {
                 // Back / outside tap must not silently discard a pasted timetable.
                 String typed = inputHolder[0] == null ? "" : inputHolder[0].getText().toString().trim();
                 if (allowClose[0] || typed.isEmpty()) { super.cancel(); return; }
-                confirm(s(R.string.sheet_discard_paste_title), s(R.string.sheet_discard_paste_message),
+                confirm("discard", s(R.string.sheet_discard_paste_title), s(R.string.sheet_discard_paste_message),
                         s(R.string.sheet_discard), true,
                         () -> { allowClose[0] = true; holder[0].cancel(); });
             }
@@ -690,6 +800,12 @@ final class PastelCourseSheet {
         input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(TextTimetableParser.MAX_TEXT_CHARS)});
         input.setContentDescription(s(R.string.sheet_paste_input_desc));
         inputHolder[0] = input;
+        if (restoredState != null) {
+            input.setText(restoredState.getString("text", ""));
+            int length = input.length();
+            input.setSelection(clamp(restoredState.getInt("selectionStart", length), 0, length),
+                    clamp(restoredState.getInt("selectionEnd", length), 0, length));
+        }
         body.addView(input, new LinearLayout.LayoutParams(-1, -2));
 
         TextView useExample = quickChip(s(R.string.sheet_use_example), v -> setText(input, example));
@@ -739,10 +855,12 @@ final class PastelCourseSheet {
         cancel.setOnClickListener(v -> dialog.cancel());
         TextView submit = primaryButton(s(R.string.sheet_recognize), coral);
         submit.setOnClickListener(v -> {
+            if (allowClose[0]) return; // accepted: do not replace the saveable review during closing animation
             String message = importer.submit(input.getText().toString());
             if (message == null) {
                 allowClose[0] = true;
-                dialog.dismiss();
+                if (onAccepted != null) switchSheet(dialog, onAccepted);
+                else dialog.dismiss();
             } else {
                 error.setText(message);
                 error.setVisibility(View.VISIBLE);
@@ -753,7 +871,20 @@ final class PastelCourseSheet {
         buttons.addView(cancel, cp);
         buttons.addView(submit, new LinearLayout.LayoutParams(0, dp(48), 2));
         root.addView(buttons, new LinearLayout.LayoutParams(-1, -2));
+        activePasteDialog = dialog;
+        activePasteInput = input;
+        activePasteScroll = scroll;
+        dialog.setOnDismissListener(d -> {
+            if (activePasteDialog == dialog) {
+                activePasteDialog = null;
+                activePasteInput = null;
+                activePasteScroll = null;
+            }
+            if (onClosed != null) onClosed.run();
+        });
         present(dialog, root, false);
+        if (restoredState != null) scroll.post(() -> scroll.scrollTo(0, restoredState.getInt("scroll", 0)));
+        restoreEditorConfirmation(restoredState, dialog, null);
     }
 
     // ---------------------------------------------------------------- personal events
@@ -766,8 +897,10 @@ final class PastelCourseSheet {
     private static final int[] REMIND_PRESETS = {PersonalEvent.NO_REMINDER, 0, 10, 30, 60, 1440};
 
     private BottomSheetDialog activeEventDialog;
+    private android.app.DatePickerDialog activeEventDatePicker;
     private BottomSheetDialog activeReminderConfirmation;
     private EditText[] activeEventInputs;
+    private NestedScrollView activeEventScroll;
     private PersonalEvent activeEventDraft;
     private boolean[] activeCustomReminder;
     private String activeEventInitial;
@@ -783,6 +916,10 @@ final class PastelCourseSheet {
         state.putBoolean("showInTimetable", activeEventDraft.showInTimetable);
         state.putBoolean("custom", activeCustomReminder[0]);
         state.putString("initial", activeEventInitial);
+        state.putInt("scroll", activeEventScroll.getScrollY());
+        captureConfirmation(state);
+        if (activeEventDatePicker != null && activeEventDatePicker.isShowing())
+            state.putBundle("date_picker", activeEventDatePicker.onSaveInstanceState());
         for (int i = 0; i < activeEventInputs.length; i++) {
             state.putString("input" + i, activeEventInputs[i].getText().toString());
         }
@@ -809,7 +946,7 @@ final class PastelCourseSheet {
     }
 
     void showEventDetail(PersonalEvent event, long now, Runnable onEdit, Runnable onBack, Bundle restoredState) {
-        BottomSheetDialog dialog = new BottomSheetDialog(context);
+        BottomSheetDialog dialog = new ManagedSheet(context);
         final boolean[] forward = {false};
         LinearLayout root = sheetRoot();
         NestedScrollView scroll = boundedScroll();
@@ -842,7 +979,7 @@ final class PastelCourseSheet {
         TextView close = secondaryButton(s(R.string.action_close));
         close.setOnClickListener(v -> dialog.dismiss());
         TextView edit = primaryButton(s(R.string.sheet_edit_event), coral);
-        edit.setOnClickListener(v -> { forward[0] = true; dialog.dismiss(); if (onEdit != null) onEdit.run(); });
+        edit.setOnClickListener(v -> { forward[0] = true; switchSheet(dialog, onEdit); });
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, dp(48), 1);
         cp.rightMargin = dp(10);
         buttons.addView(close, cp);
@@ -905,16 +1042,17 @@ final class PastelCourseSheet {
         final boolean[] allowClose = {false};
         final BottomSheetDialog[] holder = new BottomSheetDialog[1];
         final String[] initial = {null};
-        BottomSheetDialog dialog = new GuardedBottomSheetDialog(context) {
+        BottomSheetDialog dialog = new ManagedSheet(context) {
             @Override public void cancel() {
                 if (allowClose[0] || eventSnapshot(inputs, draft, customReminder[0]).equals(initial[0])) { super.cancel(); return; }
-                confirm(s(R.string.sheet_discard_event_title), s(R.string.sheet_discard_message),
+                confirm("discard", s(R.string.sheet_discard_event_title), s(R.string.sheet_discard_message),
                         s(R.string.action_discard_changes), true,
                         () -> { allowClose[0] = true; holder[0].cancel(); });
             }
         };
         holder[0] = dialog;
         dialog.setOnDismissListener(d -> {
+            closeEventDatePicker();
             if (activeReminderConfirmation != null) {
                 activeReminderConfirmation.dismiss();
                 activeReminderConfirmation = null;
@@ -922,6 +1060,7 @@ final class PastelCourseSheet {
             if (activeEventDialog == dialog) {
                 activeEventDialog = null;
                 activeEventInputs = null;
+                activeEventScroll = null;
                 activeEventDraft = null;
                 activeCustomReminder = null;
                 activeEventInitial = null;
@@ -978,11 +1117,7 @@ final class PastelCourseSheet {
                     draft.day = c.get(java.util.Calendar.DAY_OF_MONTH);
                     refreshDate[0].run();
                 } else {
-                    android.app.DatePickerDialog picker = new android.app.DatePickerDialog(context,
-                            (view, y, m, d) -> { draft.year = y; draft.month = m + 1; draft.day = d; refreshDate[0].run(); },
-                            draft.year, draft.month - 1, draft.day);
-                    picker.show();
-                    AppFonts.install(picker);
+                    showEventDatePicker(draft, refreshDate[0], null);
                 }
             });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(42), i == 3 ? 1.6f : 1f);
@@ -997,11 +1132,13 @@ final class PastelCourseSheet {
         LinearLayout startCol = column();
         startCol.addView(sectionLabel(s(R.string.sheet_start_time), null));
         inputs[1] = input(s(R.string.sheet_start_time_hint), PersonalEvent.formatTime(draft.startMinutes));
+        inputs[1].setTag("event:start");
         inputs[1].setInputType(android.text.InputType.TYPE_CLASS_DATETIME | android.text.InputType.TYPE_DATETIME_VARIATION_TIME);
         startCol.addView(inputs[1], fieldParams());
         LinearLayout endCol = column();
         endCol.addView(sectionLabel(s(R.string.sheet_end_time_optional), null));
         inputs[2] = input(s(R.string.sheet_end_time_hint), PersonalEvent.formatTime(draft.endMinutes));
+        inputs[2].setTag("event:end");
         inputs[2].setInputType(android.text.InputType.TYPE_CLASS_DATETIME | android.text.InputType.TYPE_DATETIME_VARIATION_TIME);
         endCol.addView(inputs[2], fieldParams());
         LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, -2, 1);
@@ -1009,6 +1146,22 @@ final class PastelCourseSheet {
         timePair.addView(startCol, half);
         timePair.addView(endCol, new LinearLayout.LayoutParams(0, -2, 1));
         form.addView(timePair, new LinearLayout.LayoutParams(-1, -2));
+        TextView timeFeedback = text("", 12, muted, false);
+        timeFeedback.setTag("event:time-feedback");
+        timeFeedback.setPadding(dp(12), dp(10), dp(12), dp(10));
+        timeFeedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        LinearLayout.LayoutParams feedbackParams = new LinearLayout.LayoutParams(-1, -2);
+        feedbackParams.topMargin = dp(8);
+        form.addView(timeFeedback, feedbackParams);
+        TextWatcher timeWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            @Override public void afterTextChanged(Editable s) {
+                updateEventTimeFeedback(inputs[1], inputs[2], timeFeedback);
+            }
+        };
+        inputs[1].addTextChangedListener(timeWatcher);
+        inputs[2].addTextChangedListener(timeWatcher);
 
         form.addView(sectionLabel(s(R.string.sheet_location_optional), null));
         inputs[3] = input(s(R.string.sheet_event_location_hint), draft.location);
@@ -1026,6 +1179,8 @@ final class PastelCourseSheet {
 
         com.google.android.material.switchmaterial.SwitchMaterial showInTimetable =
                 new com.google.android.material.switchmaterial.SwitchMaterial(context);
+        showInTimetable.setUseMaterialThemeColors(false);
+        styleSwitch(showInTimetable);
         showInTimetable.setText(s(R.string.event_show_in_timetable));
         showInTimetable.setTextColor(ink);
         showInTimetable.setTextSize(14);
@@ -1115,16 +1270,18 @@ final class PastelCourseSheet {
         remindHint.setPadding(dp(2), dp(8), 0, 0);
         form.addView(remindHint);
 
-        if (editing && deleter != null) {
-            TextView delete = text(s(R.string.sheet_delete_event), 14, danger, true);
+        Runnable requestDelete = editing && deleter != null ? () -> confirm("delete",
+                s(R.string.sheet_delete_event_title),
+                s(R.string.sheet_delete_event_message, nonempty(draft.title, s(R.string.sheet_untitled_event))),
+                s(R.string.action_delete), true, () -> {
+                    if (deleter.delete()) { allowClose[0] = true; dialog.dismiss(); }
+                }) : null;
+        if (requestDelete != null) {
+            TextView delete = text(s(R.string.sheet_delete_event), 14, palette.onErrorContainer, true);
             delete.setGravity(Gravity.CENTER);
             delete.setPadding(0, dp(14), 0, dp(14));
-            delete.setBackground(ripple(dark ? Color.argb(28, 255, 138, 128) : color("#FDEDEE"), 14));
-            delete.setOnClickListener(v -> confirm(s(R.string.sheet_delete_event_title),
-                    s(R.string.sheet_delete_event_message, nonempty(draft.title, s(R.string.sheet_untitled_event))),
-                    s(R.string.action_delete), true, () -> {
-                        if (deleter.delete()) { allowClose[0] = true; dialog.dismiss(); }
-                    }));
+            delete.setBackground(ripple(palette.errorContainer, 14));
+            delete.setOnClickListener(v -> requestDelete.run());
             LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, -2);
             dlp.topMargin = dp(22);
             form.addView(delete, dlp);
@@ -1144,7 +1301,7 @@ final class PastelCourseSheet {
         TextView cancel = secondaryButton(s(R.string.action_cancel));
         cancel.setOnClickListener(v -> dialog.cancel());
         TextView save = primaryButton(s(editing ? R.string.sheet_save_changes : R.string.sheet_add_event), coral);
-        save.setOnClickListener(v -> {
+        EventSaveAction saveAction = restoreExpiredConfirmation -> {
             PersonalEvent candidate = draft.copy();
             String message = readEvent(context, inputs, candidate);
             if (message == null && customReminder[0]) {
@@ -1173,8 +1330,8 @@ final class PastelCourseSheet {
                     error.setVisibility(View.VISIBLE);
                 }
             };
-            if (candidate.reminderExpired(System.currentTimeMillis())) {
-                activeReminderConfirmation = confirmChoice(s(R.string.sheet_reminder_passed_title),
+            if (restoreExpiredConfirmation || candidate.reminderExpired(System.currentTimeMillis())) {
+                activeReminderConfirmation = confirmChoice("expired_reminder", s(R.string.sheet_reminder_passed_title),
                         s(R.string.sheet_reminder_passed_message),
                         s(R.string.sheet_save_without_reminder), s(R.string.sheet_go_back_edit), false, () -> {
                             candidate.remindMinutes = PersonalEvent.NO_REMINDER;
@@ -1183,7 +1340,8 @@ final class PastelCourseSheet {
             } else {
                 persist.run();
             }
-        });
+        };
+        save.setOnClickListener(v -> saveAction.run(false));
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, dp(48), 1);
         cp.rightMargin = dp(10);
         buttons.addView(cancel, cp);
@@ -1210,12 +1368,88 @@ final class PastelCourseSheet {
             refreshDate[0].run();
             refreshRemind[0].run();
         }
+        updateEventTimeFeedback(inputs[1], inputs[2], timeFeedback);
         activeEventDialog = dialog;
         activeEventInputs = inputs;
+        activeEventScroll = scroll;
         activeEventDraft = draft;
         activeCustomReminder = customReminder;
         activeEventInitial = initial[0];
         present(dialog, root, false);
+        if (restoredState != null) restoreEventScrollAfterLayout(scroll, restoredState.getInt("scroll", 0));
+        if (restoredState != null && restoredState.getBundle("date_picker") != null && dialog.isShowing())
+            showEventDatePicker(draft, refreshDate[0], restoredState.getBundle("date_picker"));
+        else if (restoredState != null && "expired_reminder".equals(restoredState.getString("confirmation")))
+            saveAction.run(true);
+        else restoreEditorConfirmation(restoredState, dialog, requestDelete);
+    }
+
+    private interface EventSaveAction { void run(boolean restoreExpiredConfirmation); }
+
+    private void updateEventTimeFeedback(EditText startInput, EditText endInput, TextView feedback) {
+        String startText = startInput.getText().toString().trim();
+        String endText = endInput.getText().toString().trim();
+        int start = PersonalEvent.parseTime(startText);
+        int end = PersonalEvent.parseTime(endText);
+        int error = startText.isEmpty() ? R.string.event_time_error_start_required
+                : start < 0 ? R.string.event_time_error_start_invalid
+                : !endText.isEmpty() && end < 0 ? R.string.event_time_error_end_invalid
+                : !endText.isEmpty() && end <= start ? R.string.event_time_error_order : 0;
+        String message;
+        if (error != 0) {
+            message = s(error);
+        } else if (endText.isEmpty()) {
+            message = s(R.string.event_time_summary_no_end, PersonalEvent.formatTime(start));
+        } else {
+            int duration = end - start;
+            String durationText = duration < 60 ? s(R.string.event_time_duration_minutes, duration)
+                    : duration % 60 == 0 ? s(R.string.event_time_duration_hours, duration / 60)
+                    : s(R.string.event_time_duration_hours_minutes, duration / 60, duration % 60);
+            message = s(R.string.event_time_summary, PersonalEvent.formatTime(start),
+                    PersonalEvent.formatTime(end), durationText);
+        }
+        if (!message.contentEquals(feedback.getText())) feedback.setText(message);
+        feedback.setTextColor(error == 0 ? palette.secondary : palette.onErrorContainer);
+        feedback.setBackground(round(error == 0 ? palette.inset : palette.errorContainer, 12));
+    }
+
+    private static void restoreEventScrollAfterLayout(NestedScrollView scroll, int position) {
+        // A posted callback can precede the first measured frame after a configuration change.
+        scroll.getViewTreeObserver().addOnGlobalLayoutListener(new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override public void onGlobalLayout() {
+                if (scroll.getHeight() <= 0 || scroll.getChildCount() == 0
+                        || scroll.getChildAt(0).getHeight() <= 0) return;
+                scroll.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                scroll.scrollTo(0, Math.max(0, position));
+            }
+        });
+    }
+
+    private void showEventDatePicker(PersonalEvent draft, Runnable refresh, Bundle restored) {
+        if (activeEventDialog == null || !activeEventDialog.isShowing() || activeEventDatePicker != null) return;
+        android.app.DatePickerDialog picker = new android.app.DatePickerDialog(context,
+                (view, year, month, day) -> {
+                    if (activeEventDialog == null || !activeEventDialog.isShowing()) return;
+                    draft.year = year; draft.month = month + 1; draft.day = day;
+                    refresh.run();
+                }, draft.year, draft.month - 1, draft.day);
+        activeEventDatePicker = picker;
+        picker.setOnDismissListener(d -> { if (activeEventDatePicker == picker) activeEventDatePicker = null; });
+        try {
+            picker.show();
+            if (restored != null) picker.onRestoreInstanceState(restored);
+            stylePickerButtons(picker);
+            AppFonts.install(picker);
+        } catch (RuntimeException failure) {
+            closeEventDatePicker();
+            throw failure;
+        }
+    }
+
+    private void closeEventDatePicker() {
+        android.app.DatePickerDialog picker = activeEventDatePicker;
+        activeEventDatePicker = null;
+        if (picker != null) picker.dismiss();
     }
 
     /** Copies the text fields into {@code event}; returns an error for unparsable times. */
@@ -1278,11 +1512,27 @@ final class PastelCourseSheet {
         final View view;
         private final List<PersonalEvent> events;
         private final Runnable refresh;
+        private final View eventSection, hiddenHint;
+        private final DisplayMode[] displayMode;
 
-        private MinePage(View view, List<PersonalEvent> events, Runnable refresh) {
+        private MinePage(View view, List<PersonalEvent> events, Runnable refresh,
+                         View eventSection, View hiddenHint, DisplayMode[] displayMode) {
             this.view = view;
             this.events = events;
             this.refresh = refresh;
+            this.eventSection = eventSection;
+            this.hiddenHint = hiddenHint;
+            this.displayMode = displayMode;
+        }
+
+        void setDisplayMode(DisplayMode mode) {
+            DisplayMode nextMode = mode == null ? DisplayMode.COMBINED : mode;
+            if (displayMode[0] == nextMode) return;
+            displayMode[0] = nextMode;
+            boolean showEvents = displayMode[0].showsEvents();
+            eventSection.setVisibility(showEvents ? View.VISIBLE : View.GONE);
+            hiddenHint.setVisibility(showEvents ? View.GONE : View.VISIBLE);
+            refresh.run();
         }
 
         void setEvents(List<PersonalEvent> next) {
@@ -1295,7 +1545,8 @@ final class PastelCourseSheet {
     /** 「我的」: all personal events (upcoming first, finished ones dimmed) plus the settings entry. */
     MinePage minePage(Runnable onAdd, EventOpener onOpen, Runnable onSettings) {
         List<PersonalEvent> events = new java.util.ArrayList<>();
-        EventOpener openForward = id -> { if (onOpen != null) onOpen.open(id); };
+        DisplayMode[] displayMode = {DisplayMode.COMBINED};
+        EventOpener openForward = id -> { if (displayMode[0].showsEvents() && onOpen != null) onOpen.open(id); };
         NestedScrollView scroll = new NestedScrollView(context);
         scroll.setFillViewport(true);
         scroll.setVerticalScrollBarEnabled(false);
@@ -1308,30 +1559,40 @@ final class PastelCourseSheet {
         header.addView(text(s(R.string.sheet_mine_title), 23, ink, true), new LinearLayout.LayoutParams(0, -2, 1));
         body.addView(header, new LinearLayout.LayoutParams(-1, dp(52)));
 
+        LinearLayout eventSection = column();
+        body.addView(eventSection, new LinearLayout.LayoutParams(-1, -2));
+        TextView hiddenHint = text(s(R.string.display_mode_mine_courses_only), 13, muted, false);
+        hiddenHint.setPadding(dp(16), dp(26), dp(16), dp(26));
+        hiddenHint.setBackground(round(surface, 16));
+        hiddenHint.setVisibility(View.GONE);
+        body.addView(hiddenHint, new LinearLayout.LayoutParams(-1, -2));
+
         LinearLayout titleRow = row();
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
         titleRow.setPadding(dp(2), dp(4), 0, dp(8));
         TextView count = text("", 14, ink, true);
         titleRow.addView(count, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView add = quickChip(s(R.string.sheet_add_event_chip), v -> { if (onAdd != null) onAdd.run(); });
+        TextView add = quickChip(s(R.string.sheet_add_event_chip), v -> {
+            if (displayMode[0].showsEvents() && onAdd != null) onAdd.run();
+        });
         add.setContentDescription(s(R.string.sheet_add_event));
         titleRow.addView(add);
-        body.addView(titleRow, new LinearLayout.LayoutParams(-1, -2));
+        eventSection.addView(titleRow, new LinearLayout.LayoutParams(-1, -2));
         TextView hint = text(s(R.string.sheet_mine_hint), 11, muted, false);
         hint.setPadding(dp(2), 0, 0, dp(10));
-        body.addView(hint);
+        eventSection.addView(hint);
 
         LinearLayout eventRows = column();
-        body.addView(eventRows, new LinearLayout.LayoutParams(-1, -2));
+        eventSection.addView(eventRows, new LinearLayout.LayoutParams(-1, -2));
         Runnable refreshRows = () -> {
             int oldY = scroll.getScrollY();
             Long anchorId = null;
             int anchorOffset = 0;
             for (int i = 0; i < eventRows.getChildCount(); i++) {
                 View child = eventRows.getChildAt(i);
-                if (child.getTag() instanceof Long && eventRows.getTop() + child.getBottom() > oldY) {
+                if (child.getTag() instanceof Long && eventSection.getTop() + eventRows.getTop() + child.getBottom() > oldY) {
                     anchorId = (Long) child.getTag();
-                    anchorOffset = eventRows.getTop() + child.getTop() - oldY;
+                    anchorOffset = eventSection.getTop() + eventRows.getTop() + child.getTop() - oldY;
                     break;
                 }
             }
@@ -1364,7 +1625,7 @@ final class PastelCourseSheet {
             if (oldY > 0) scroll.post(() -> {
                 if (!scroll.isAttachedToWindow()) return;
                 View anchor = keepId == null ? null : eventRows.findViewWithTag(keepId);
-                scroll.scrollTo(0, anchor == null ? oldY : eventRows.getTop() + anchor.getTop() - keepOffset);
+                scroll.scrollTo(0, anchor == null ? oldY : eventSection.getTop() + eventRows.getTop() + anchor.getTop() - keepOffset);
             });
         };
         refreshRows.run();
@@ -1393,7 +1654,7 @@ final class PastelCourseSheet {
         final String[] lastState = {mineState(events)};
         Runnable ticker = new Runnable() {
             @Override public void run() {
-                if (!scroll.isAttachedToWindow() || !scroll.isShown()) return;
+                if (!displayMode[0].showsEvents() || !scroll.isAttachedToWindow() || !scroll.isShown()) return;
                 String next = mineState(events);
                 if (!lastState[0].equals(next)) {
                     lastState[0] = next;
@@ -1407,13 +1668,13 @@ final class PastelCourseSheet {
             refreshRows.run();
             // Restart the per-second check whenever the page is refreshed or becomes visible again.
             scroll.removeCallbacks(ticker);
-            if (scroll.isAttachedToWindow() && scroll.isShown()) scroll.postDelayed(ticker, 1000);
+            if (displayMode[0].showsEvents() && scroll.isAttachedToWindow() && scroll.isShown()) scroll.postDelayed(ticker, 1000);
         };
         scroll.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
             @Override public void onViewAttachedToWindow(View v) { v.removeCallbacks(ticker); v.post(ticker); }
             @Override public void onViewDetachedFromWindow(View v) { v.removeCallbacks(ticker); }
         });
-        return new MinePage(scroll, events, update);
+        return new MinePage(scroll, events, update, eventSection, hiddenHint, displayMode);
     }
 
     private String mineState(List<PersonalEvent> events) {
@@ -1435,7 +1696,10 @@ final class PastelCourseSheet {
     private View mineRow(PersonalEvent e, boolean past, EventOpener onOpen) {
         LinearLayout row = column();
         row.setPadding(dp(14), dp(12), dp(14), dp(12));
-        row.setBackground(ripple(past ? (dark ? color("#1A2030") : color("#ECEEF3")) : surface, 14));
+        int rowFill = past ? (dark ? DarkUiPalette.RECESSED : color("#ECEEF3")) : surface;
+        row.setBackground(dark
+                ? rippleBordered(rowFill, 14, past ? DarkUiPalette.SUBTLE_LINE : line)
+                : ripple(rowFill, 14));
         int titleColor = past ? muted : ink;
         TextView title = text(nonempty(e.title, s(R.string.sheet_untitled_event)), 15, titleColor, true);
         title.setSingleLine(true);
@@ -1491,7 +1755,57 @@ final class PastelCourseSheet {
         };
     }
 
+    /** Dismissal listeners are composed rather than replacing host draft cleanup. */
+    private class ManagedSheet extends GuardedBottomSheetDialog {
+        ModalCoordinator.Token token;
+        android.content.DialogInterface.OnDismissListener cleanup;
+        Runnable fallbackNext;
+        ManagedSheet(Context context) {
+            super(context);
+            super.setOnDismissListener(d -> {
+                if (mainDialog == this) mainDialog = null;
+                if (confirmation != null) confirmation.dismiss();
+                if (cleanup != null) cleanup.onDismiss(d);
+                if (onDismissed != null) onDismissed.run();
+                if (coordinator != null) coordinator.dismissed(token);
+                else if (fallbackNext != null) { Runnable next = fallbackNext; fallbackNext = null; next.run(); }
+            });
+        }
+        @Override public void setOnDismissListener(android.content.DialogInterface.OnDismissListener listener) {
+            cleanup = listener;
+        }
+        @Override public void dismiss() {
+            if (coordinator != null) coordinator.closing(token);
+            super.dismiss();
+        }
+    }
+
+    private void switchSheet(BottomSheetDialog dialog, Runnable next) {
+        ManagedSheet managed = (ManagedSheet) dialog;
+        if (coordinator != null) {
+            if (!coordinator.switchAfterDismiss(managed.token, next)) return;
+        } else {
+            if (managed.fallbackNext != null) return;
+            managed.fallbackNext = next;
+        }
+        dialog.dismiss();
+    }
+
+    void dismissForDestroy() {
+        closeEventDatePicker();
+        if (confirmation != null) confirmation.dismiss();
+        if (mainDialog != null) mainDialog.dismiss();
+    }
+
     private void present(BottomSheetDialog dialog, View content, boolean draggable) {
+        if (dialog instanceof ManagedSheet) {
+            ManagedSheet managed = (ManagedSheet) dialog;
+            if (coordinator != null) {
+                managed.token = coordinator.tryAcquire("sheet");
+                if (managed.token == null) return;
+            }
+            mainDialog = managed;
+        }
         dialog.setContentView(content);
         if (content.getParent() instanceof View) {
             ((View) content.getParent()).setBackgroundColor(Color.TRANSPARENT);
@@ -1500,11 +1814,25 @@ final class PastelCourseSheet {
         behavior.setSkipCollapsed(true);
         behavior.setState(BottomSheetBehavior.STATE_EXPANDED);
         behavior.setDraggable(draggable);
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            window.setNavigationBarColor(sheetBg);
+            WindowInsetsControllerCompat controller = new WindowInsetsControllerCompat(window, window.getDecorView());
+            controller.setAppearanceLightNavigationBars(!dark);
         }
-        dialog.show();
-        AppFonts.install(dialog);
+        try {
+            dialog.show();
+            if (dialog instanceof ManagedSheet && coordinator != null) {
+                ModalCoordinator.Token token = ((ManagedSheet) dialog).token;
+                content.post(() -> coordinator.opened(token));
+            }
+            AppFonts.install(dialog);
+        } catch (RuntimeException error) {
+            if (dialog instanceof ManagedSheet && coordinator != null)
+                coordinator.dismissed(((ManagedSheet) dialog).token);
+            throw error;
+        }
     }
 
     private LinearLayout sheetRoot() {
@@ -1513,9 +1841,19 @@ final class PastelCourseSheet {
         bg.setColor(sheetBg);
         float r = dp(26);
         bg.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
-        root.setBackground(bg);
+        if (dark) {
+            GradientDrawable rim = new GradientDrawable();
+            rim.setColor(Color.TRANSPARENT);
+            rim.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
+            rim.setStroke(dp(1), Color.argb(26, 255, 255, 255));
+            LayerDrawable layered = new LayerDrawable(new Drawable[]{bg, rim});
+            layered.setLayerInset(1, 0, 0, 0, -dp(2));
+            root.setBackground(layered);
+        } else {
+            root.setBackground(bg);
+        }
         View handle = new View(context);
-        handle.setBackground(round(dark ? color("#3A4560") : color("#D5D9E8"), 3));
+        handle.setBackground(round(dark ? DarkUiPalette.HANDLE : color("#D5D9E8"), 3));
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(dp(38), dp(5));
         hp.gravity = Gravity.CENTER_HORIZONTAL;
         hp.setMargins(0, dp(10), 0, dp(12));
@@ -1584,15 +1922,16 @@ final class PastelCourseSheet {
         return chip;
     }
 
-    /** Selected chip: coral fill. Chips before {@code disabledBefore} are dimmed and inert. */
+    /** Selected chip: coral fill with contrast-safe ink. Chips before {@code disabledBefore} are dimmed and inert. */
     private void refreshChoices(TextView[] chips, int selected, int disabledBefore) {
+        int selectedInk = DarkUiPalette.chipInk(coral, dark);
         for (int i = 0; i < chips.length; i++) {
             boolean on = i == selected;
             boolean disabled = i < disabledBefore;
             GradientDrawable bg = round(on ? coral : surface, 13);
             if (!on) bg.setStroke(dp(1), line);
             chips[i].setBackground(bg);
-            chips[i].setTextColor(on ? Color.WHITE : ink);
+            chips[i].setTextColor(on ? selectedInk : ink);
             if (!on && chips[i].getText() instanceof android.text.Spanned) chips[i].setTextColor(ink);
             chips[i].setTypeface(Typeface.DEFAULT, on ? Typeface.BOLD : Typeface.NORMAL);
             chips[i].setAlpha(disabled ? 0.32f : 1f);
@@ -1621,7 +1960,7 @@ final class PastelCourseSheet {
     }
 
     private TextView primaryButton(String label, int fill) {
-        TextView b = text(label, 15, Color.WHITE, true);
+        TextView b = text(label, 15, fill == coral ? palette.onAccent : CoursePalette.readableInk(fill), true);
         b.setGravity(Gravity.CENTER);
         b.setBackground(ripple(fill, 15));
         return b;
@@ -1630,14 +1969,34 @@ final class PastelCourseSheet {
     private TextView secondaryButton(String label) {
         TextView b = text(label, 15, ink, true);
         b.setGravity(Gravity.CENTER);
-        b.setBackground(ripple(lavender, 15));
+        b.setBackground(ripple(palette.inset, 15));
         return b;
     }
 
     private Drawable ripple(int fill, float radius) {
+        return rippleBordered(fill, radius, Color.TRANSPARENT);
+    }
+
+    private Drawable rippleBordered(int fill, float radius, int strokeColor) {
         GradientDrawable content = round(fill, radius);
+        if (strokeColor != Color.TRANSPARENT) content.setStroke(dp(1), strokeColor);
         return new RippleDrawable(ColorStateList.valueOf(dark ? Color.argb(50, 255, 255, 255) : Color.argb(36, 37, 49, 77)),
                 content, round(Color.WHITE, radius));
+    }
+
+    private void styleSwitch(androidx.appcompat.widget.SwitchCompat toggle) {
+        int[][] states = {{android.R.attr.state_checked}, {}};
+        toggle.setThumbTintList(new ColorStateList(states,
+                new int[]{coral, dark ? 0xFFA2AAB8 : Color.WHITE}));
+        toggle.setTrackTintList(new ColorStateList(states,
+                new int[]{withAlpha(coral, dark ? 115 : 130), withAlpha(muted, dark ? 76 : 64)}));
+    }
+
+    private void stylePickerButtons(android.app.DatePickerDialog picker) {
+        android.widget.Button ok = picker.getButton(android.content.DialogInterface.BUTTON_POSITIVE);
+        if (ok != null) ok.setTextColor(coral);
+        android.widget.Button cancel = picker.getButton(android.content.DialogInterface.BUTTON_NEGATIVE);
+        if (cancel != null) cancel.setTextColor(muted);
     }
 
     private void readInputs(Draft draft, EditText[] inputs) {
@@ -1648,8 +2007,13 @@ final class PastelCourseSheet {
     }
 
     private static String snapshot(Draft d) {
-        return d.day + "|" + d.start + "|" + d.end + "|" + d.color + "|" + d.colorManuallySelected
-                + "|" + d.name + "|" + d.weeks + "|" + d.room + "|" + d.teacher;
+        StringBuilder result = new StringBuilder(d.day + "|" + d.start + "|" + d.end + "|" + d.color
+                + "|" + d.colorManuallySelected);
+        for (String value : new String[]{d.name, d.weeks, d.room, d.teacher}) {
+            String raw = value == null ? "" : value;
+            result.append('|').append(raw.length()).append(':').append(raw);
+        }
+        return result.toString();
     }
 
     private static void setText(EditText edit, String value) {

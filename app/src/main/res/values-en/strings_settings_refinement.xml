@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_display_footer">Mode selects courses, events, or both. Week and list select the layout. Changing mode keeps your data and reminders.</string>
+    <string name="settings_import_footer">Import courses from a timetable file or pasted text, then review before saving.</string>
+    <string name="settings_reminders_section">Reminders</string>
+    <string name="settings_time_footer">Period times define course slots. The academic calendar defines term dates and teaching weeks.</string>
+    <plurals name="settings_period_count">
+        <item quantity="one">%1$d period</item>
+        <item quantity="other">%1$d periods</item>
+    </plurals>
+    <string name="settings_font_value">%1$s · %2$d%%</string>
+    <string name="settings_appearance_footer">The accent colors interface controls. Course colors distinguish courses and can be adjusted separately.</string>
+</resources>

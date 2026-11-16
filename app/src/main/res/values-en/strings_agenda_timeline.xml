@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agenda_timeline_time_heading">Time</string>
+    <string name="agenda_timeline_events_title">Choose an event</string>
+    <string name="agenda_timeline_group_description">%1$s. Events: %2$d. Tap to choose. %3$s</string>
+    <plurals name="agenda_timeline_event_count">
+        <item quantity="one">%d event</item>
+        <item quantity="other">%d events</item>
+    </plurals>
+</resources>

@@ -1,0 +1,12 @@
+<resources>
+    <string name="week_picker_title">Choose week</string>
+    <string name="week_picker_summary">Weeks 1–%1$d · Tap to switch</string>
+    <string name="week_picker_viewing_week">Viewing week %1$d</string>
+    <string name="week_picker_outside">Viewing a date outside the semester. Find personal events by date.</string>
+    <string name="week_picker_week">Week %1$d</string>
+    <string name="week_picker_viewing">Viewing</string>
+    <string name="week_picker_this_week">This week</string>
+    <string name="week_picker_current">Back to this week</string>
+    <string name="week_picker_find_date">Find by date (including outside the semester)</string>
+    <string name="week_picker_close">Close</string>
+</resources>

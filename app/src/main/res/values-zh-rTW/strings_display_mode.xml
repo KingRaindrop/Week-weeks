@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="display_mode_section">顯示內容</string>
+    <string name="display_mode_title">模式選擇</string>
+    <string name="display_mode_timetable">課表模式</string>
+    <string name="display_mode_agenda">日程模式</string>
+    <string name="display_mode_combined">綜合模式</string>
+    <string name="display_mode_save_failed">模式儲存失敗，請重試</string>
+</resources>

@@ -6,12 +6,12 @@ import java.util.Set;
 import static org.junit.Assert.*;
 
 public class UiAccentPaletteTest {
-    @Test public void exactlySixteenNamedOpaqueUniquePairs() {
-        assertEquals(16, UiAccentPalette.NAMES.length);
-        assertEquals(16, UiAccentPalette.COLORS.length);
+    @Test public void exactlyTwentyTwoNamedOpaqueUniquePairs() {
+        assertEquals(22, UiAccentPalette.NAMES.length);
+        assertEquals(22, UiAccentPalette.COLORS.length);
         Set<String> names = new HashSet<>();
         Set<Integer> light = new HashSet<>(), dark = new HashSet<>();
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < UiAccentPalette.COLORS.length; i++) {
             assertTrue(names.add(UiAccentPalette.NAMES[i]));
             assertFalse(UiAccentPalette.NAMES[i].trim().isEmpty());
             int[] pair = UiAccentPalette.COLORS[i];
@@ -43,7 +43,7 @@ public class UiAccentPaletteTest {
     }
 
     @Test public void newLightAccentsAndDarkAccentsHaveReadableContrast() {
-        for (int i = 8; i < 16; i++) {
+        for (int i = 8; i < UiAccentPalette.COLORS.length; i++) {
             int light = UiAccentPalette.COLORS[i][0], dark = UiAccentPalette.COLORS[i][1];
             assertTrue(UiAccentPalette.NAMES[i] + " light", CoursePalette.contrast(light, 0xFFFFFFFF) >= 4.5);
             assertTrue(UiAccentPalette.NAMES[i] + " dark", CoursePalette.contrast(dark, 0xFF111622) >= 4.5);
@@ -61,6 +61,6 @@ public class UiAccentPaletteTest {
         assertEquals(32, CoursePalette.MUTED_COLORS.length);
         assertEquals(0xFF9CB2C1, CoursePalette.MUTED_COLORS[0]);
         assertEquals(0xFF5C7080, CoursePalette.MUTED_COLORS[31]);
-        for (int i = 8; i < 16; i++) assertFalse(CoursePalette.isMuted(UiAccentPalette.COLORS[i][0]));
+        for (int i = 8; i < UiAccentPalette.COLORS.length; i++) assertFalse(CoursePalette.isMuted(UiAccentPalette.COLORS[i][0]));
     }
 }

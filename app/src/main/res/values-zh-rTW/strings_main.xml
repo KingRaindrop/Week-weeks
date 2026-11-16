@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- MainActivity (part "main"). Keys must exist in values, values-zh-rTW and values-en. -->
-    <string name="main_accent_summary">選擇主色調，全域生效</string>
     <string name="main_accent_title">介面色調</string>
     <string name="main_add_course">新增課程</string>
     <string name="main_add_course_cta">＋ 新增課程</string>
@@ -17,7 +16,6 @@
     <string name="main_calendar_save_failed">校曆儲存失敗，請檢查裝置儲存空間狀態</string>
     <string name="main_calendar_settings">校曆設定</string>
     <string name="main_calendar_manual_name">手動設定校曆</string>
-    <string name="main_calendar_settings_summary">設定開學日和散學日</string>
     <string name="main_changes_saved">已儲存修改</string>
     <string name="main_choose_week">選擇週次</string>
     <string name="main_class_over">已下課</string>
@@ -52,6 +50,7 @@
     <string name="main_edit_course">編輯課程</string>
     <string name="main_end_after_start">結束時間必須晚於開始時間</string>
     <string name="main_end_before_start">散學日不能早於開學日</string>
+    <string name="main_calendar_too_long">一個學期最多支援 %1$d 週，請調整開學日或散學日</string>
     <string name="main_enter_course_name">請填寫課程名稱</string>
     <string name="main_event">日程</string>
     <string name="main_event_added">日程已新增</string>
@@ -75,8 +74,7 @@
     <string name="main_hint_room">教室 / 地點</string>
     <string name="main_hint_weeks" tools:ignore="TypographyDashes">例如 1-6周,9-17周,1-16周单周</string>
     <string name="main_import_error">匯入錯誤: %1$s</string>
-    <string name="main_import_pdf">匯入 PDF 課表</string>
-    <string name="main_import_pdf_summary">從檔案解析課程、週次和教室</string>
+    <string name="main_import_pdf">匯入課表檔案</string>
     <string name="main_import_result_imported">匯入 %1$d 門課程</string>
     <string name="main_import_result_skipped">，略過 %1$d 門</string>
     <string name="main_import_result_title">課程辨識結果</string>
@@ -115,17 +113,16 @@
     <string name="main_outside_term">學期外</string>
     <string name="main_outside_term_message">課程依校曆教學週安排，不會出現在目前日期。臨時安排請新增個人日程；若要編輯學期課表，儲存後將跳到有課的教學週。</string>
     <string name="main_outside_term_title">目前檢視的是學期外日期</string>
-    <string name="main_parsing_pdf">正在解析 PDF 課表…</string>
+    <string name="main_parsing_pdf">正在解析課表檔案…</string>
     <string name="main_paste_import">貼上文字課表</string>
-    <string name="main_paste_import_summary">PDF 無法辨識時，依範例格式貼上匯入</string>
     <string name="main_pasted_text_source">貼上的文字</string>
     <string name="main_pastel_msg_default">課程與個人安排請查看日程清單</string>
     <string name="main_pastel_msg_outside">學期外 · 可檢視和新增個人日程</string>
     <string name="main_pastel_msg_preview">正在檢視其他週；編輯會修改實際課表</string>
-    <string name="main_pdf_import_failed">PDF 匯入失敗: %1$s</string>
-    <string name="main_pdf_permission_lost">PDF 讀取權限已失效，請重新選擇檔案</string>
-    <string name="main_pdf_too_large">PDF 檔案超過 5MB，已拒絕匯入</string>
-    <string name="main_pdf_unreadable">無法讀取 PDF 檔案</string>
+    <string name="main_pdf_import_failed">檔案匯入失敗: %1$s</string>
+    <string name="main_pdf_permission_lost">檔案讀取權限已失效，請重新選擇檔案</string>
+    <string name="main_pdf_too_large">課表檔案超過 5MB，已拒絕匯入</string>
+    <string name="main_pdf_unreadable">無法讀取課表檔案</string>
     <string name="main_period_badge_label">節</string>
     <string name="main_period_delete_blocked">該節次或後續節次已有課程，刪除會改變課程時間；只能刪除末尾未使用的節次</string>
     <string name="main_period_format_invalid">第 %1$d 節格式不正確</string>
@@ -135,7 +132,6 @@
     <string name="main_period_save_failed">節次設定儲存失敗，請檢查裝置儲存空間狀態</string>
     <string name="main_period_saved">節次設定已儲存</string>
     <string name="main_period_settings">課程節次設定</string>
-    <string name="main_period_settings_summary">設定第 1 節到第 N 節的時間</string>
     <string name="main_period_time_invalid">第 %1$d 節時間不正確</string>
     <string name="main_period_with_time">第 %1$d 節 · %2$s</string>
     <string name="main_periods_order">節次時間需要依從早到晚排列，且不能重疊</string>
@@ -149,7 +145,6 @@
     <string name="main_preview_courses">【課程預覽】</string>
     <string name="main_preview_days">【課程分布】</string>
     <string name="main_preview_item">"%1$d. %2$s\n   %3$s 第%4$d-%5$d節 %6$s\n"</string>
-    <string name="main_preview_more">… 還有 %1$d 門</string>
     <string name="main_preview_parsed">成功解析: %1$d 門課程</string>
     <string name="main_preview_per_day">"%1$s: %2$d門  "</string>
     <string name="main_preview_per_period">"第%1$d節: %2$d次  "</string>
@@ -157,7 +152,6 @@
     <string name="main_preview_stats">【解析統計】</string>
     <string name="main_randomize_button">隨機配色</string>
     <string name="main_randomize_colors">一鍵隨機配色</string>
-    <string name="main_randomize_colors_summary">優先使用明快預設色，同名課程保持同色</string>
     <string name="main_randomize_message" formatted="false">將重新分配目前課表全部課程的顏色，覆蓋手動選色。同名課程保持同色，使用12種精選配色，每輪用完前不重複，超過12門時循環分配；手動選色仍保留42色。已上完課程在淺色模式保留原色，以30%背景不透明度的效果淡化，文字保持清晰；深色模式保持輕度淡化。課程時間和其他資訊不會改變。</string>
     <string name="main_reminders">提醒通知</string>
     <string name="main_reminders_off_desc">%1$s，提醒通知已關閉，點按開啟</string>
@@ -180,7 +174,6 @@
     <string name="main_shake_stop_desc">%1$s，點兩下停止課前抖動</string>
     <string name="main_shake_stopped">已停止本節課抖動</string>
     <string name="main_show_teacher">顯示老師姓名</string>
-    <string name="main_show_teacher_summary">在週課表和清單中顯示，詳情一律保留</string>
     <string name="main_skip_exists">%1$s: 已存在</string>
     <string name="main_skip_limit">%1$s: 達到上限</string>
     <string name="main_skip_reasons">略過原因:\n%1$s</string>
@@ -200,6 +193,10 @@
     <string name="main_storage_locked_warning">⚠️ 加密課表無法讀取\n\n為避免覆蓋原資料，已暫停儲存。\n請檢查系統金鑰或清除應用程式資料後重新開始。</string>
     <string name="main_switch_to_dark">切換到深色模式</string>
     <string name="main_switch_to_light">切換到淺色模式</string>
+    <string name="main_theme_mode_title">外觀模式</string>
+    <string name="main_theme_follow_system">跟隨系統</string>
+    <string name="main_theme_light">淺色模式</string>
+    <string name="main_theme_dark">深色模式</string>
     <string name="main_tap_to_select_suffix">，點按選擇</string>
     <string name="main_temp_weeks_message">從目前第 %1$d 週開始，只上 N 週。</string>
     <string name="main_temp_weeks_outside">目前不在校曆教學週內，無法設定臨時週次</string>
@@ -212,7 +209,6 @@
     <string name="main_test_reminder">測試課前通知</string>
     <string name="main_test_reminder_course">課前通知測試</string>
     <string name="main_test_reminder_room">模擬器測試</string>
-    <string name="main_test_reminder_summary">在偵錯版中立即跳出一次提醒</string>
     <string name="main_test_send_failed">測試通知傳送失敗，請檢查通知開關</string>
     <string name="main_test_sent">已傳送一則測試通知</string>
     <string name="main_this_week">本週</string>

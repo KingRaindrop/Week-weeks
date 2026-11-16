@@ -32,13 +32,25 @@ You open your timetable to find your next classroom—not to watch an ad first.
   <tr>
     <td align="center"><img src="docs/images/timetable.png" width="260" alt="Week weeks weekly timetable with fictional classes and soft colors"><br><strong>Your week of classes, at a glance</strong></td>
     <td align="center"><img src="docs/images/agenda.png" width="260" alt="Week weeks agenda showing fictional classes and personal events"><br><strong>There is life beyond classes</strong></td>
-    <td align="center"><img src="docs/images/appearance.png" width="260" alt="Week weeks interface tone picker showing 16 accent colors"><br><strong>Interface tones, your choice</strong></td>
+    <td align="center"><img src="docs/images/appearance.png" width="260" alt="Week weeks interface tone picker"><br><strong>Interface tones, your choice</strong></td>
   </tr>
 </table>
 
 *Images come from a separate demo installation. All classes, locations, and personal events are fictional examples; no real user timetable is included. The screenshot language does not limit the app language: Simplified Chinese, Traditional Chinese, and English are supported.*
 
 ## Simple, with the essentials covered
+
+### Choose the content and how to view it
+
+Choose a mode under Settings → Display content → Mode selection to control which content appears. Combined is the default, and the current choice is shown above the timetable.
+
+| Content | What appears |
+| --- | --- |
+| Courses (Timetable mode) | Courses in the semester timetable |
+| Events (Agenda mode) | Personal events, including dates outside the semester |
+| Combined | Courses and personal events together |
+
+**Week view** and **List** control the layout within the selected mode. Switching modes preserves the current date and layout, stored courses and events, and their reminders. “Me” provides a place to manage personal events.
 
 ### Timetable: from your next class to the whole semester
 
@@ -51,22 +63,32 @@ You open your timetable to find your next classroom—not to watch an ad first.
 ### Agenda: make room for life
 
 - Add one-time personal events with a date, start/end times, location, and notes.
-- View classes and personal events by date in “Events,” and manage personal events together in “Me.”
+- In Agenda mode, Week view places events on a shared time axis and sizes cards to their duration. Short events and events without an end time keep a minimum visual span of 30 minutes; their saved times remain unchanged.
+- Overlapping events use side-by-side cards when space permits. A count badge groups events when space is tight; tap it to choose from every event in the group. Counts over 99 appear as `99+`.
+- Each day has an add button for that date. List view displays the selected content in time order.
+- While editing, see the time range, duration, or “No end time set” immediately. Invalid times and an end time before or equal to the start time are explained beside the inputs.
 - Choose preset or custom lead times for local reminders. The app can restore reminder schedules after a device restart or app update.
 
 ### Import: less repetitive typing
 
-- Import text-based PDF timetables through the system file picker, without requesting broad storage read/write permissions.
-- Paste a text timetable, then preview and confirm it before saving.
-- PDF parsing depends on the document layout: not every school's format is supported. OCR for scanned documents is not supported.
-- Text import currently uses Chinese weekday and period keywords. Changing the interface language does not change the parsing rules.
+- Import text-based **PDF, XLSX, CSV, TSV, or TXT** timetables through the system file picker, without requesting broad storage read/write permissions. You can also paste timetable text.
+- Preview the parsed courses, review individual entries, and confirm before saving.
+- Spreadsheets and delimited text use **one course per row**. Start with the [XLSX template](<docs/templates/timetable-list-template.xlsx>) or [CSV template](<docs/templates/timetable-list-template.csv>).
+- Common Simplified Chinese, Traditional Chinese, and English column headings and weekday names such as `周一` and `Mon` are supported. See the [import guide](<docs/IMPORT-PARSERS-20261114.md>) and [parser compatibility notes](<docs/IMPORT-PARSERS-20261115.md>) for formats and limitations.
+- Legacy `.xls` files must first be saved as XLSX or CSV. Arbitrary visual spreadsheet grids are not automatically recognized. PDF parsing depends on the document layout, and OCR for scanned documents is not supported.
 
 ### Appearance: clean, and personal too
 
-- Light, dark, and system-default themes, with 16 interface accents and 42 preset class colors.
+- Light, dark, and system-default themes, with **22 interface accents** and 42 preset class colors. Interface accents and course colors are independent.
 - Classes with the same name share a base color. You can also randomize colors by class-name groups.
 - Use the system font or OPPO Sans, and adjust the app's text size from 85% to 125%. The OPPO Sans file is proprietary (about 21.7 MB) and is not redistributed here; place it at `app/src/main/assets/fonts/oppo_sans.ttf` to enable that preset. Without it the preset falls back to the system font and everything else keeps working.
 - Three interface languages: Simplified Chinese, Traditional Chinese, and English. The system language is used by default.
+
+### Settings: keep your place
+
+- Settings are grouped into Display, Timetable, Reminders, Time, Appearance, and Data. Each setting shows its current value, with explanations below the group.
+- Confirming or canceling theme, font, and content-mode dialogs returns you to the same place in Settings. Applying theme or font changes and rotating the settings page also preserve your place.
+- Setting names and values stack on narrow screens or with larger text. Reminder status and its accessibility description update as soon as you toggle reminders.
 
 ## Your data, your device
 
@@ -87,13 +109,19 @@ Reminders may be affected by notification permissions, exact alarm permissions, 
 ## Get started
 
 1. Use a device running **Android 6.0 (API 23) or later** and install a signed APK.
-2. On first launch, set the semester's start and end dates.
-3. Add classes manually, or import a PDF/text timetable and confirm the preview.
-4. If you want reminders, grant the relevant permissions. Adjust appearance and language in Settings.
+2. Set the semester's start and end dates in Settings. A successful timetable import also prompts for the academic calendar if it has not been configured.
+3. Add classes or events manually, or import a supported timetable file or pasted text and confirm the preview.
+4. Choose Courses, Events, or Combined content, then use Week view or List. If you want reminders, grant the relevant permissions; appearance and language are also available in Settings.
 
 The official application ID is `com.weekweeks.app`. Development and release builds use the same current interface; there are no separate “original” and “pastel” product editions. The internal `pastel` build is retained only as a compatibility testing entry point, not a separate product version. Data does not migrate automatically between different application IDs, and apps from before the rename are not automatically uninstalled.
 
-The current source version is **1.2.3** (`versionCode 6`). This repository does not assume a download URL. If an APK has not yet been published, you can build it from source as described below.
+The current source version is **1.2.7** (`versionCode 10`). This repository does not assume a download URL. If an APK has not yet been published, you can build it from source as described below.
+
+## Current changes and verification
+
+The November 16, 2026 update improves event timelines, overlap selection, grouped settings, returning from setting dialogs, and time-editing feedback. Debug and Release each passed **368 unit tests**, and both lint reports show **0 errors and 7 existing warnings**. The isolated UI device audit passed **993 checks**, with additional mode-switching, timeline, and reminder-flow regressions passing.
+
+Device checks used a separate audit package on MuMu Android 12 (API 32). They do not cover every Android version or manufacturer. See the [UI refinement report](<docs/UI-REFINEMENT-20261116.md>) for scope and limitations.
 
 ## Build from source
 

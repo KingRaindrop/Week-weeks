@@ -62,6 +62,10 @@ public class ClassReminderReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         context = AppLanguage.wrap(context);
+        if (ReminderDiagnostics.isTestIntent(intent)) {
+            ReminderDiagnostics.receiveTest(context, intent);
+            return;
+        }
         // Continue the chain before attempting to post. A denied notification permission must not
         // make every later reminder for the course unreachable.
         if (!ReminderScheduler.scheduleNextFromBroadcast(context, intent)) {
@@ -80,17 +84,28 @@ public class ClassReminderReceiver extends BroadcastReceiver {
     }
 
     private static boolean postNotification(Context context, Intent intent) {
-        if (Build.VERSION.SDK_INT >= 33
-                && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-            return false;
+        try {
+            return submitNotification(context, intent);
+        } catch (SecurityException denied) {
+            ReminderDiagnostics.recordPost(context, ReminderDiagnosticRules.Code.POST_SECURITY_ERROR);
+        } catch (RuntimeException failed) {
+            ReminderDiagnostics.recordPost(context, ReminderDiagnosticRules.Code.POST_ERROR);
         }
+        return false;
+    }
 
+    private static boolean submitNotification(Context context, Intent intent) {
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) {
+            ReminderDiagnostics.recordPost(context, ReminderDiagnosticRules.Code.NOTIFICATION_SERVICE_UNAVAILABLE);
             return false;
         }
         ensureChannel(context, manager);
+        ReminderDiagnosticRules.Code blocker = ReminderDiagnostics.postBlocker(context);
+        if (blocker != ReminderDiagnosticRules.Code.NONE) {
+            ReminderDiagnostics.recordPost(context, blocker);
+            return false;
+        }
 
         String name = intent.getStringExtra(EXTRA_COURSE_NAME);
         String time = intent.getStringExtra(EXTRA_COURSE_TIME);
@@ -167,6 +182,8 @@ public class ClassReminderReceiver extends BroadcastReceiver {
                 .build();
 
         manager.notify(reminderId, notification);
+        ReminderDiagnostics.recordPost(context, ReminderDiagnostics.channelQuiet(context)
+                ? ReminderDiagnosticRules.Code.POST_SUBMITTED_QUIET : ReminderDiagnosticRules.Code.POST_SUBMITTED);
         return true;
     }
 

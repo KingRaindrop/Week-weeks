@@ -33,10 +33,6 @@
     <string name="view_this_week_short">本週</string>
     <string name="view_pick_week_desc">選擇日期查看所在週，支援學期外日程</string>
     <string name="view_back_to_this_week">回到本週</string>
-    <string name="view_segment_week">週檢視</string>
-    <string name="view_segment_list">列表</string>
-    <string name="view_tab_timetable">課表</string>
-    <string name="view_tab_agenda">日程</string>
     <string name="view_tab_mine">我的</string>
     <string name="view_teaching_week">教學週</string>
     <string name="view_untitled_course">未命名課程</string>

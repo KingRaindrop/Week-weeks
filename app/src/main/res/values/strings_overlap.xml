@@ -1,0 +1,10 @@
+<resources>
+    <plurals name="overlap_course_count"><item quantity="other">%1$d门课</item></plurals>
+    <string name="overlap_pick_course">点按选择</string>
+    <string name="overlap_courses_title">此时段有多门课程</string>
+    <string name="overlap_courses_description">%1$s，第%2$d至%3$d节有重叠课程：%4$s。点按选择课程</string>
+    <plurals name="import_overlap_count"><item quantity="other">发现 %1$d 组课程时间冲突</item></plurals>
+    <string name="import_overlap_explanation">确认导入会保留这些课程。周视图会显示多课程入口，你可以点开查看、编辑。也可取消导入后修改文件。</string>
+    <string name="import_overlap_pair">• %1$s / %2$s：%3$s 第%4$d至%5$d节，上课周有交集</string>
+    <plurals name="import_overlap_more"><item quantity="other">另有 %1$d 组冲突；导入后可在对应课格中查看。</item></plurals>
+</resources>

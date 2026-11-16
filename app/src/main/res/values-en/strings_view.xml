@@ -33,10 +33,6 @@
     <string name="view_this_week_short">Today</string>
     <string name="view_pick_week_desc">Pick a date to view its week, including outside the term</string>
     <string name="view_back_to_this_week">Back to this week</string>
-    <string name="view_segment_week">Week</string>
-    <string name="view_segment_list">List</string>
-    <string name="view_tab_timetable">Timetable</string>
-    <string name="view_tab_agenda">Events</string>
     <string name="view_tab_mine">Me</string>
     <string name="view_teaching_week">Teaching week</string>
     <string name="view_untitled_course">Untitled course</string>

@@ -30,6 +30,11 @@ final class DirtyConfirmDialog extends AlertDialog {
                 .create();
         confirmation.setOnDismissListener(dialog -> confirmation = null);
         confirmation.show();
+        boolean dark = MainActivity.isDarkModeFor(getContext());
+        android.widget.Button discardBtn = confirmation.getButton(BUTTON_POSITIVE);
+        if (discardBtn != null) discardBtn.setTextColor(dark ? 0xFFF48070 : 0xFFB14337);
+        android.widget.Button keepBtn = confirmation.getButton(BUTTON_NEGATIVE);
+        if (keepBtn != null) keepBtn.setTextColor(MainActivity.accentColorFor(getContext()));
         AppFonts.install(confirmation);
     }
 

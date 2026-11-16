@@ -18,10 +18,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputFilter;
-import android.text.SpannableString;
-import android.text.Spanned;
 import android.text.TextUtils;
-import android.text.style.RelativeSizeSpan;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -62,11 +59,9 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -116,21 +111,9 @@ public class MainActivity extends AppCompatActivity {
     private static final double DAY_FIRST_COLUMN_X = 99.08;
     private static final double DAY_COLUMN_WIDTH = 103.85;
     private String[] dayNames;
-    private static final String[] DEFAULT_PERIOD_TIMES = {
-            "08:00-08:45",
-            "08:55-09:40",
-            "10:00-10:45",
-            "10:55-11:40",
-            "14:30-15:15",
-            "15:25-16:10",
-            "16:20-17:05",
-            "17:15-18:00",
-            "19:30-20:15",
-            "20:25-21:10",
-            "21:20-22:05"
-    };
+    private static final String[] DEFAULT_PERIOD_TIMES = StoredTimetableSnapshot.DEFAULT_PERIOD_TIMES;
     private static final int[] COURSE_COLORS = CoursePalette.appendColors(new int[]{
-            Color.rgb(52, 123, 128),
+            Course.DEFAULT_COLOR,
             Color.rgb(68, 111, 166),
             Color.rgb(91, 126, 84),
             Color.rgb(132, 100, 151),
@@ -163,20 +146,30 @@ public class MainActivity extends AppCompatActivity {
     private int pendingAddPeriod = 1; // legacy editor default; pastel UI passes the tapped period directly
     private PastelTimetableView pastelTimetable;
     private long pastelBrowseDate; // 0 follows today; otherwise a date in the browsed week.
+    private String browseTimeZoneId = java.util.TimeZone.getDefault().getID();
     private PastelCourseSheet activeEventEditor;
     private long activeEventId;
     private boolean eventFromMine;
     private PastelCourseSheet.MinePage minePage;
     private Bundle pendingEventRestore;
+    private final ModalCoordinator modalCoordinator = new ModalCoordinator();
+    private final List<PastelCourseSheet> modalSheets = new ArrayList<>();
+    private PastelCourseSheet activeCourseDetail;
+    private long activeCourseDetailId;
+    private boolean pendingCourseDetailRestore;
+    private AlertDialog outsideTermDialog;
     private PastelCourseSheet activeCourseEditor;
     private long activeCourseId;
     private Bundle pendingCourseRestore;
     private PastelCourseSheet activeEventDetail;
     private long activeEventDetailId;
     private Bundle pendingDetailRestore;
+    private PastelCourseSheet activePasteImport;
+    private Bundle pendingPasteRestore;
     private interface SettingsDraftCapture { Bundle capture(); }
     private SettingsDraftCapture settingsDraftCapture;
     private SettingsDraftCapture periodRuleDraftCapture;
+    private AlertDialog activePeriodRuleDialog;
     private Bundle pendingSettingsRestore;
     private Bundle pendingPeriodRuleRestore;
     private FrameLayout dayTabFrame;
@@ -187,6 +180,11 @@ public class MainActivity extends AppCompatActivity {
     private TextView statusChip;
     private ImageButton themeToggle;
     private View settingsOverlay;
+    private ScrollView settingsScroller;
+    private boolean settingsReturnPending, activityRecreating;
+    private int settingsScrollPosition;
+    private String settingsScrollAnchor;
+    private float settingsScrollOffsetDp;
     private int selectedDay = 0;
     private int viewingWeek = 0; // 0=跟随真实当前周；非 0=预览该周
     private TextView weekRangeText;
@@ -194,13 +192,23 @@ public class MainActivity extends AppCompatActivity {
     private ImageButton weekNextButton;
     private TextView weekLiveBadge;
     private LinearLayout weekNavRow;
-    private AlertDialog weekPickerDialog;
+    private android.app.Dialog weekPickerDialog;
+    private android.app.DatePickerDialog browseDatePickerDialog;
+    private android.app.Dialog reminderStatusDialog;
+    private final List<android.app.Dialog> ownedDialogs = new ArrayList<>();
+    private ImportFlowState importFlow;
+    private CalendarSetupDialog.State calendarDraft;
+    private CalendarSetupDialog calendarEditor;
+    private boolean restoringInteractions = true;
+    private boolean destroyingActivity;
     private HorizontalScrollView dayScroll;
     private int lastAutoScrolledDay = -1;
     private boolean storageLocked = false;
     private boolean isDarkMode = false;
     private boolean activityResumed = false;
-    private Runnable pendingReminderPopup;
+    // Store verified notification data, never an Activity-bound callback, across recreation.
+    private final ArrayList<Bundle> pendingReminderPopups = new ArrayList<>();
+    private Bundle activeReminderPopup;
     private final DeferredResult<Runnable> pdfImportDelivery = new DeferredResult<>();
     private Thread pdfImportThread;
     private Uri pendingImportUri;
@@ -214,6 +222,7 @@ public class MainActivity extends AppCompatActivity {
     private int daySwipePointerId = MotionEvent.INVALID_POINTER_ID;
     private boolean daySwipeChildCancelled = false;
     private int themeMode = 1; // 1=浅色, 2=深色
+    private DisplayMode displayMode = DisplayMode.COMBINED;
     private static final String STATE_SELECTED_DAY = "state_selected_day";
     private static final String STATE_VIEWING_WEEK = "state_viewing_week";
 
@@ -228,12 +237,17 @@ public class MainActivity extends AppCompatActivity {
         courseColorNames = CoursePalette.appendNames(getResources().getStringArray(R.array.main_course_color_names));
         applyAppNightMode();
         super.onCreate(savedInstanceState);
+        // Deferred windows (import review, reminder popup) wait for real idleness, never overlap.
+        modalCoordinator.setIdleListener(() -> uiHandler.post(this::drainDeferredModals));
         loadThemeMode();
+        loadDisplayMode();
+        AcademicCalendarStore.initializeLegacyZone(getSharedPreferences(PREFS_NAME, MODE_PRIVATE));
         loadPeriodTimes();
         configureWindow();
         selectedDay = currentSchoolDay();
-        loadCourses();
         loadPersonalEvents();
+        // Legacy course migration can rebuild reminders; read independent events first.
+        loadCourses();
         // Migrate old per-entry colors to one shared color per course name, transactionally.
         List<Course> normalizedColors = copyCourses();
         if (CourseColorRules.synchronize(normalizedColors)) saveCourses(normalizedColors);
@@ -255,6 +269,9 @@ public class MainActivity extends AppCompatActivity {
         }
         if (savedInstanceState != null) {
             pastelBrowseDate = savedInstanceState.getLong("agenda_browse_date", 0L);
+            browseTimeZoneId = savedInstanceState.getString("agenda_browse_zone", browseTimeZoneId);
+            activeCourseDetailId = savedInstanceState.getLong("course_detail_id", 0L);
+            pendingCourseDetailRestore = activeCourseDetailId != 0L;
             pendingCourseRestore = savedInstanceState.getBundle("course_editor");
             activeCourseId = savedInstanceState.getLong("course_editor_id", 0L);
             activeEventDetailId = savedInstanceState.getLong("event_detail_id", 0L);
@@ -263,6 +280,20 @@ public class MainActivity extends AppCompatActivity {
             activeEventId = savedInstanceState.getLong("event_editor_id", 0L);
             eventFromMine = savedInstanceState.getBoolean("event_from_mine", false);
             pendingSettingsRestore = savedInstanceState.getBundle("settings_draft");
+            Bundle settingsNavigation = savedInstanceState.getBundle("settings_navigation");
+            if (settingsNavigation != null) {
+                settingsReturnPending = settingsNavigation.getBoolean("open");
+                settingsScrollPosition = settingsNavigation.getInt("scroll");
+                settingsScrollAnchor = settingsNavigation.getString("anchor");
+                settingsScrollOffsetDp = settingsNavigation.getFloat("offset_dp");
+            }
+            pendingPasteRestore = savedInstanceState.getBundle("paste_import");
+            importFlow = ImportFlowStateCodec.restore(savedInstanceState.getBundle("import_flow"));
+            calendarDraft = CalendarSetupDialog.State.restore(savedInstanceState.getBundle("calendar_draft"));
+            ArrayList<Bundle> reminders = savedInstanceState.getParcelableArrayList("reminder_popups");
+            if (reminders != null) pendingReminderPopups.addAll(reminders);
+            if (importFlow != null) pendingPasteRestore = null; // accepted text is now a review, not an editor
+
         }
         buildLayout();
         AppFonts.install(getWindow().getDecorView());
@@ -289,7 +320,9 @@ public class MainActivity extends AppCompatActivity {
             });
         }
         render();
-        if (pendingCourseRestore != null) {
+        if (pendingPasteRestore != null) {
+            uiHandler.post(this::showPasteImport);
+        } else if (pendingCourseRestore != null) {
             uiHandler.post(() -> {
                 Course course = activeCourseId == 0 ? null : findCourseById(activeCourseId);
                 if (activeCourseId != 0 && course == null) {
@@ -310,6 +343,13 @@ public class MainActivity extends AppCompatActivity {
                     showPersonalEventEditor(event);
                 }
             });
+        } else if (pendingCourseDetailRestore) {
+            uiHandler.post(() -> {
+                pendingCourseDetailRestore = false;
+                Course course = findCourseById(activeCourseDetailId);
+                if (course != null) showPastelCourseDetail(course);
+                else activeCourseDetailId = 0;
+            });
         } else if (activeEventDetailId != 0) {
             uiHandler.post(() -> {
                 PersonalEvent event = findPersonalEvent(activeEventDetailId);
@@ -326,6 +366,22 @@ public class MainActivity extends AppCompatActivity {
                 if (pendingSettingsRestore == null) return;
                 String kind = pendingSettingsRestore.getString("kind", "");
                 if ("font".equals(kind)) showFontDialog();
+                else if ("theme_mode".equals(kind)) showThemeModeDialog();
+                else if ("display_mode".equals(kind)) showDisplayModeDialog();
+                else if ("language".equals(kind)) showLanguageDialog();
+                else if ("accent".equals(kind)) showAccentColorDialog();
+                else if ("week_picker".equals(kind)) showWeekPickerDialog();
+                else if ("date_picker".equals(kind)) showPastelDatePicker();
+                else if ("overlap_courses".equals(kind)) {
+                    long[] ids = pendingSettingsRestore.getLongArray("ids");
+                    pendingSettingsRestore = null;
+                    if (ids != null) showOverlappingCourses(ids);
+                }
+                else if ("overlap_events".equals(kind)) {
+                    long[] ids = pendingSettingsRestore.getLongArray("ids");
+                    pendingSettingsRestore = null;
+                    if (ids != null) showOverlappingEvents(ids);
+                }
                 else if ("periods".equals(kind)) showPeriodSettingsDialog();
                 else if ("classic_course".equals(kind)) {
                     long id = pendingSettingsRestore.getLong("id", 0L);
@@ -339,25 +395,55 @@ public class MainActivity extends AppCompatActivity {
                 else pendingSettingsRestore = null;
             });
         }
-        maybeShowReminderPopupFromIntent(getIntent());
+        // The system can replay the original launch Intent after process death. A saved
+        // queue (including an empty acknowledged queue) already accounts for that launch.
+        // New notification clicks are still delivered and authenticated by onNewIntent.
+        if (savedInstanceState == null || !savedInstanceState.containsKey("reminder_popups"))
+            maybeShowReminderPopupFromIntent(getIntent());
         ensureNotificationPermission();
         maybeSendDebugReminderTestNotification(getIntent());
         scheduleClassReminderNotifications();
         // Calendar setup belongs to a successful timetable import, not app launch.
         if (savedInstanceState != null) {
             String importUri = savedInstanceState.getString(STATE_IMPORT_URI);
-            if (importUri != null) {
+            if (importUri != null && importFlow == null) {
                 importPdf(Uri.parse(importUri));
             }
         }
+        // Existing editor/settings restore posts were queued first. Async results must not steal their token.
+        uiHandler.post(() -> {
+            restoringInteractions = false;
+            deliverPendingPdfResult();
+            drainDeferredModals();
+        });
     }
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
+        if (settingsOverlayVisible()) captureSettingsPosition(null);
+        Bundle settingsNavigation = new Bundle();
+        settingsNavigation.putBoolean("open", settingsOverlayVisible() || settingsReturnPending);
+        settingsNavigation.putInt("scroll", settingsScrollPosition);
+        settingsNavigation.putString("anchor", settingsScrollAnchor);
+        settingsNavigation.putFloat("offset_dp", settingsScrollOffsetDp);
+        outState.putBundle("settings_navigation", settingsNavigation);
+        ArrayList<Bundle> reminders = new ArrayList<>();
+        if (activeReminderPopup != null) reminders.add(new Bundle(activeReminderPopup));
+        for (Bundle reminder : pendingReminderPopups) reminders.add(new Bundle(reminder));
+        outState.putParcelableArrayList("reminder_popups", reminders);
         if (settingsDraftCapture != null) outState.putBundle("settings_draft", settingsDraftCapture.capture());
         else if (pendingSettingsRestore != null) outState.putBundle("settings_draft", pendingSettingsRestore);
+        Bundle pasteDraft = activePasteImport == null ? null : activePasteImport.capturePasteImportState();
+        if (importFlow == null) {
+            if (pasteDraft != null) outState.putBundle("paste_import", pasteDraft);
+            else if (pendingPasteRestore != null) outState.putBundle("paste_import", pendingPasteRestore);
+        }
+        outState.putBundle("import_flow", ImportFlowStateCodec.save(importFlow));
+        CalendarSetupDialog.State calendarState = calendarEditor != null ? calendarEditor.capture() : calendarDraft;
+        if (calendarState != null) outState.putBundle("calendar_draft", calendarState.save());
         outState.putLong("agenda_browse_date", pastelBrowseDate);
+        outState.putString("agenda_browse_zone", browseTimeZoneId);
         outState.putBoolean("mine_visible", pastelTimetable != null && pastelTimetable.isMine());
         outState.putBoolean("event_from_mine", eventFromMine);
         if (pastelTimetable != null) {
@@ -370,6 +456,9 @@ public class MainActivity extends AppCompatActivity {
                 outState.putBundle("event_editor", draft);
                 outState.putLong("event_editor_id", activeEventId);
             }
+        } else if (pendingEventRestore != null) {
+            outState.putBundle("event_editor", pendingEventRestore);
+            outState.putLong("event_editor_id", activeEventId);
         }
         if (activeCourseEditor != null) {
             Bundle draft = activeCourseEditor.captureCourseEditorState();
@@ -377,7 +466,12 @@ public class MainActivity extends AppCompatActivity {
                 outState.putBundle("course_editor", draft);
                 outState.putLong("course_editor_id", activeCourseId);
             }
+        } else if (pendingCourseRestore != null) {
+            outState.putBundle("course_editor", pendingCourseRestore);
+            outState.putLong("course_editor_id", activeCourseId);
         }
+        if (pendingCourseDetailRestore || (activeCourseDetail != null && activeCourseDetail.isShowing()))
+            outState.putLong("course_detail_id", activeCourseDetailId);
         if (activeEventDetail != null && activeEventDetailId != 0) {
             outState.putLong("event_detail_id", activeEventDetailId);
             outState.putBundle("event_detail", activeEventDetail.captureEventDetailState());
@@ -402,16 +496,13 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         activityResumed = true;
         pdfImportDelivery.setResumed(true);
-        deliverPendingPdfResult();
+        uiHandler.post(this::deliverPendingPdfResult);
         countdownSnapshots.clear();
         render();
         scheduleMinuteTick();
         scheduleClassReminderNotifications();
-        if (pendingReminderPopup != null) {
-            Runnable popup = pendingReminderPopup;
-            pendingReminderPopup = null;
-            uiHandler.post(popup);
-        }
+        refreshSettingsReminderStatus();
+        uiHandler.post(this::drainDeferredModals);
     }
 
     @Override
@@ -431,9 +522,23 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        // Invalidate ownership before dismiss callbacks: never open a successor on a dead Activity.
+        destroyingActivity = true;
+        modalCoordinator.destroy();
+        if (calendarEditor != null) calendarEditor.closeChild();
+        if (outsideTermDialog != null) outsideTermDialog.dismiss();
+        if (weekPickerDialog != null) weekPickerDialog.dismiss();
+        if (browseDatePickerDialog != null) browseDatePickerDialog.dismiss();
+        if (reminderStatusDialog != null) reminderStatusDialog.dismiss();
+        for (android.app.Dialog dialog : new ArrayList<>(ownedDialogs)) dialog.dismiss();
+        ownedDialogs.clear();
+        importFlow = null;
+        for (PastelCourseSheet sheet : new ArrayList<>(modalSheets)) sheet.dismissForDestroy();
+        modalSheets.clear();
         pdfImportDelivery.destroy();
         cancelPdfImport();
-        pendingReminderPopup = null;
+        pendingReminderPopups.clear();
+        activeReminderPopup = null;
         uiHandler.removeCallbacksAndMessages(null);
         minuteHandler.removeCallbacksAndMessages(null);
         super.onDestroy();
@@ -624,12 +729,7 @@ public class MainActivity extends AppCompatActivity {
     private void loadThemeMode() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         int savedMode = prefs.getInt(THEME_KEY, 0);
-        if (savedMode == 1 || savedMode == 2) {
-            themeMode = savedMode;
-        } else {
-            themeMode = isSystemDarkMode() ? 2 : 1;
-            prefs.edit().putInt(THEME_KEY, themeMode).apply();
-        }
+        themeMode = (savedMode == 1 || savedMode == 2) ? savedMode : 0;
         applyThemeMode();
     }
 
@@ -655,13 +755,36 @@ public class MainActivity extends AppCompatActivity {
     private void toggleTheme() {
         themeMode = isDarkMode ? 1 : 2;
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(THEME_KEY, themeMode).apply();
+        applyAppNightMode();
+        recreateSmoothly();
+    }
+
+    private void recreateSmoothly() {
+        activityRecreating = true;
         recreate();
+        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+    }
+
+    private String themeModeLabel(int mode) {
+        if (mode == 1) return getString(R.string.main_theme_light);
+        if (mode == 2) return getString(R.string.main_theme_dark);
+        return getString(R.string.main_theme_follow_system);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_IMPORT_PDF && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            // Persist only the read grant offered by this document provider. Temporary grants can still
+            // suffice for a task restore; unsupported persistence is not itself a permission failure.
+            if ((data.getFlags() & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0
+                    && (data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+                try {
+                    getContentResolver().takePersistableUriPermission(data.getData(), Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (SecurityException unsupportedGrant) {
+                    // Continue with the current grant; actual read failure has its own user-facing handling.
+                }
+            }
             importPdf(data.getData());
         }
     }
@@ -694,7 +817,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void scheduleClassReminderNotifications() {
-        if (storageLocked || !notificationsEnabled()) {
+        if ((storageLocked && eventsLocked) || !notificationsEnabled()) {
             return;
         }
         android.app.AlarmManager alarmManager = (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
@@ -702,58 +825,12 @@ public class MainActivity extends AppCompatActivity {
             cancelScheduledClassReminders(alarmManager);
         }
         long now = System.currentTimeMillis();
-        List<ReminderScheduler.Entry> entries = new ArrayList<>();
-        Set<Integer> usedRequestCodes = new HashSet<>();
-        for (Course course : courses) {
-            if (course.temporary || course.name == null || course.name.trim().isEmpty()) {
-                continue;
-            }
-            long[] triggerTimes = reminderTriggerTimes(course, now);
-            if (triggerTimes.length == 0) {
-                continue;
-            }
-            int requestCode = reminderRequestCode(course);
-            while (usedRequestCodes.contains(requestCode)) {
-                requestCode = requestCode == Integer.MAX_VALUE ? 1 : requestCode + 1;
-            }
-            usedRequestCodes.add(requestCode);
-            entries.add(new ReminderScheduler.Entry(
-                    requestCode,
-                    course.name,
-                    periodRangeTime(course),
-                    course.room,
-                    reminderLeadMinutes(course),
-                    triggerTimes
-            ));
-        }
-        for (PersonalEvent event : personalEvents) {
-            long triggerAt = event.triggerAtMillis();
-            if (triggerAt <= now) {
-                continue;
-            }
-            int requestCode = eventRequestCode(event);
-            while (usedRequestCodes.contains(requestCode)) {
-                requestCode = requestCode == Integer.MAX_VALUE ? 1 : requestCode + 1;
-            }
-            usedRequestCodes.add(requestCode);
-            entries.add(new ReminderScheduler.Entry(
-                    requestCode,
-                    event.title,
-                    event.timeLabel(),
-                    event.location,
-                    event.remindMinutes,
-                    new long[]{triggerAt},
-                    ReminderScheduler.KIND_EVENT
-            ));
-        }
-        ReminderScheduler.replaceSchedule(this, entries);
+        List<ReminderScheduler.Entry> entries = ReminderPlanBuilder.build(
+                storageLocked ? java.util.Collections.emptyList() : courses,
+                eventsLocked ? java.util.Collections.emptyList() : personalEvents,
+                now, ReminderSourceRebuilder.courseDetails(calendarStartMillis(), calendarEndMillis(), periodTimes));
+        ReminderScheduler.replaceSchedule(this, entries, !storageLocked, !eventsLocked);
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().remove(REMINDER_CODES_KEY).apply();
-    }
-
-    /** Different mixing from course codes, so an event and a course created in the same millisecond differ. */
-    private static int eventRequestCode(PersonalEvent event) {
-        int code = (int) ((event.id * 0x9E3779B97F4A7C15L) >>> 33);
-        return code == 0 ? 1 : code;
     }
 
     private void cancelScheduledClassReminders(android.app.AlarmManager alarmManager) {
@@ -835,31 +912,15 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
-    private int reminderRequestCode(Course course) {
-        if (course == null) {
-            return 1;
-        }
-        long id = course.id;
-        if (id != 0L) {
-            return (int) (id ^ (id >>> 32)) & 0x7fffffff;
-        }
-        // id 为 0（临时/测试课程等未分配 id 的课程）：组合「日 + 节次 + 跨节数 + 周次 + 名称」，
-        // 避免同名课程（不同天/不同节次）碰撞出相同 requestCode 而互相覆盖。
-        int hash = 17;
-        hash = 31 * hash + course.day;
-        hash = 31 * hash + course.period;
-        hash = 31 * hash + Math.max(0, course.endPeriod - course.period);
-        hash = 31 * hash + (course.weeks == null ? 0 : course.weeks.hashCode());
-        hash = 31 * hash + (course.name == null ? 0 : course.name.hashCode());
-        int result = hash & 0x7fffffff;
-        return result == 0 ? 1 : result;
-    }
-
     private void configureWindow() {
         Window window = getWindow();
         int bgColor = bgColor();
         window.setStatusBarColor(bgColor);
         window.setNavigationBarColor(bgColor);
+        androidx.core.view.WindowInsetsControllerCompat controller =
+                new androidx.core.view.WindowInsetsControllerCompat(window, window.getDecorView());
+        controller.setAppearanceLightStatusBars(!isDarkMode);
+        controller.setAppearanceLightNavigationBars(!isDarkMode);
         if (isDarkMode) {
             window.getDecorView().setSystemUiVisibility(0);
         } else {
@@ -884,25 +945,42 @@ public class MainActivity extends AppCompatActivity {
                     Course course = findCourseById(id);
                     if (course != null) showPastelCourseDetail(course);
                 }
+                @Override public void onCourses(long[] ids) { showOverlappingCourses(ids); }
                 @Override public void onEditCourse(long id) {
                     Course course = findCourseById(id);
                     if (course != null) showPastelCourseEditor(course, course.day, course.period);
                 }
                 @Override public void onPreviousWeek() { stepViewingWeek(-1); }
                 @Override public void onNextWeek() { stepViewingWeek(1); }
-                @Override public void onPickWeek() { showPastelDatePicker(); }
+                @Override public void onPickWeek() { showWeekPickerDialog(); }
                 @Override public void onCurrentWeek() { returnToCurrentWeek(); }
                 @Override public void onCountdownFinished() { render(); }
-                @Override public void onAddEvent() { eventFromMine = false; showPersonalEventEditor(null); }
+                @Override public void onAddEvent() {
+                    if (!mayOpenModal()) return;
+                    eventFromMine = false;
+                    showPersonalEventEditor(null);
+                }
+                @Override public void onAddEventOnDate(long dateMillis) {
+                    if (!mayOpenModal()) return;
+                    eventFromMine = false;
+                    showPersonalEventEditor(null, dateMillis);
+                }
                 @Override public void onEvent(long id) {
+                    if (!mayOpenModal()) return;
                     PersonalEvent event = findPersonalEvent(id);
                     if (event != null) { eventFromMine = false; showPersonalEventDetail(event); }
                 }
+                @Override public void onEvents(long[] ids) { showOverlappingEvents(ids); }
                 @Override public void onMine() { showMineSheet(); }
             });
             minePage = new PastelCourseSheet(this, isDarkMode, pastelAccent()).minePage(
-                    () -> { eventFromMine = true; showPersonalEventEditor(null); },
+                    () -> {
+                        if (!mayOpenModal()) return;
+                        eventFromMine = true;
+                        showPersonalEventEditor(null);
+                    },
                     id -> {
+                        if (!mayOpenModal()) return;
                         PersonalEvent event = findPersonalEvent(id);
                         if (event != null) {
                             eventFromMine = true;
@@ -1176,22 +1254,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderPastelTimetable() {
+        pastelTimetable.setDisplayMode(displayMode);
         long start = pastelDisplayedStart();
         int week = AgendaDates.week(calendarStartMillis(), start);
         boolean outside = week < 1 || week > calendarTotalWeeks();
         boolean preview = outside || start != AgendaDates.weekStart(calendarStartMillis(), System.currentTimeMillis());
         List<PastelTimetableView.Entry> entries = new ArrayList<>();
         for (Course course : courses) {
-            if (!outside && !course.temporary && courseOccursInTeachingWeek(course, week)) {
+            if (displayMode.showsCourses() && !outside && !course.temporary && courseOccursInTeachingWeek(course, week)) {
                 entries.add(pastelEntry(course));
             }
         }
-        Course featured = !preview ? currentCourseInProgress() : null;
+        Course featured = displayMode.showsCourses() && !preview ? currentCourseInProgress() : null;
         String featureStatus = featured != null ? getString(R.string.main_feature_now) : getString(R.string.main_feature_plan);
         long countdownTarget = featured != null
                 ? timeOnDateMillis(startOfTodayMillis(), courseEndMinutes(featured)) : -1;
         boolean countdownUntilEnd = featured != null;
-        if (featured == null && !preview) {
+        if (displayMode.showsCourses() && featured == null && !preview) {
             SummaryCourse next = nextUpcomingCourseFromToday();
             if (next != null) {
                 featured = next.course;
@@ -1207,12 +1286,13 @@ public class MainActivity extends AppCompatActivity {
                 (start == AgendaDates.weekStart(calendarStartMillis(), System.currentTimeMillis()) ? getString(R.string.main_this_week_prefix) : "")
                         + pastelRangeLabel(start, week), preview,
                 canBrowsePastel(-1), canBrowsePastel(1), pastelEntry(featured), featureStatus,
-                message, storageLocked, outside);
+                message, displayMode.showsCourses() && storageLocked, outside);
         pastelTimetable.setCountdown(preview ? -1 : countdownTarget, countdownUntilEnd);
         renderedTemporalSignature = temporalSignature();
     }
 
     private void render() {
+        refreshBrowseTimeZone();
         if (pastelTimetable != null) {
             renderPastelTimetable();
             return;
@@ -1332,6 +1412,16 @@ public class MainActivity extends AppCompatActivity {
         return AgendaDates.weekStart(calendarStartMillis(), pastelBrowseDate == 0 ? System.currentTimeMillis() : pastelBrowseDate);
     }
 
+    private void refreshBrowseTimeZone() {
+        java.util.TimeZone local = java.util.TimeZone.getDefault();
+        if (local.getID().equals(browseTimeZoneId)) return;
+        if (pastelBrowseDate != 0L) {
+            pastelBrowseDate = AcademicCalendarStore.rebase(pastelBrowseDate,
+                    java.util.TimeZone.getTimeZone(browseTimeZoneId), local);
+        }
+        browseTimeZoneId = local.getID();
+    }
+
     private boolean canBrowsePastel(int delta) {
         Calendar date = Calendar.getInstance();
         date.setTimeInMillis(AgendaDates.shift(pastelDisplayedStart(), delta * 7));
@@ -1352,17 +1442,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void browsePastelDate(long date) {
-        long start = AgendaDates.weekStart(calendarStartMillis(), date);
-        pastelBrowseDate = start == AgendaDates.weekStart(calendarStartMillis(), System.currentTimeMillis()) ? 0 : date;
-        int week = AgendaDates.week(calendarStartMillis(), date);
-        viewingWeek = pastelBrowseDate == 0 || week < 1 || week > calendarTotalWeeks() ? 0 : week;
+        refreshBrowseTimeZone();
+        WeekBrowseRules.Selection selection = WeekBrowseRules.selectDate(calendarStartMillis(),
+                calendarTotalWeeks(), date, System.currentTimeMillis());
+        pastelBrowseDate = selection.pastelBrowseDate;
+        viewingWeek = selection.viewingWeek;
         render();
     }
 
     private void showPastelDatePicker() {
+        refreshBrowseTimeZone();
+        if (isFinishing() || isDestroyed()) return;
+        ModalCoordinator.Token token = modalCoordinator.tryAcquire("date_picker");
+        if (token == null) return;
+        Bundle restored = pendingSettingsRestore;
+        pendingSettingsRestore = null;
+        final Runnable[] clearDraft = {() -> { }};
         Calendar date = Calendar.getInstance();
         date.setTimeInMillis(pastelBrowseDate == 0 ? System.currentTimeMillis() : pastelBrowseDate);
         android.app.DatePickerDialog picker = new android.app.DatePickerDialog(this, (view, year, month, day) -> {
+            clearDraft[0].run();
             Calendar chosen = Calendar.getInstance();
             chosen.clear();
             chosen.set(year, month, day);
@@ -1374,8 +1473,32 @@ public class MainActivity extends AppCompatActivity {
         bound.set(2100, 11, 31);
         picker.getDatePicker().setMaxDate(bound.getTimeInMillis());
         picker.setTitle(getString(R.string.main_pick_date_title));
-        picker.show();
-        AppFonts.install(picker);
+        browseDatePickerDialog = picker;
+        clearDraft[0] = beginSettingsDraft(() -> {
+            if (!picker.isShowing()) return null;
+            Bundle state = new Bundle();
+            state.putString("kind", "date_picker");
+            state.putBundle("picker", picker.onSaveInstanceState());
+            return state;
+        });
+        picker.setOnCancelListener(d -> clearDraft[0].run());
+        picker.setOnDismissListener(d -> {
+            clearDraft[0].run();
+            modalCoordinator.dismissed(token);
+            if (browseDatePickerDialog == picker) browseDatePickerDialog = null;
+        });
+        try {
+            picker.show();
+            if (restored != null && restored.getBundle("picker") != null)
+                picker.onRestoreInstanceState(restored.getBundle("picker"));
+            modalCoordinator.opened(token);
+            AppFonts.install(picker);
+        } catch (RuntimeException failure) {
+            clearDraft[0].run();
+            if (browseDatePickerDialog == picker) browseDatePickerDialog = null;
+            modalCoordinator.dismissed(token);
+            throw failure;
+        }
     }
 
     private void stepViewingWeek(int delta) {
@@ -1446,92 +1569,51 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showWeekPickerDialog() {
-        if (weekPickerDialog != null && weekPickerDialog.isShowing()) {
-            return;
-        }
-        int total = totalCalendarWeeks();
-        int selected = displayedViewingWeek();
-        int realWeek = currentTeachingWeek();
-        boolean realValid = realWeek >= 1 && realWeek <= total;
-
-        ScrollView pickerScroll = new ScrollView(this);
-        pickerScroll.setVerticalScrollBarEnabled(false);
-        LinearLayout picker = new LinearLayout(this);
-        picker.setOrientation(LinearLayout.VERTICAL);
-        picker.setPadding(dp(12), dp(4), dp(12), dp(8));
-        pickerScroll.addView(picker);
-
-        final AlertDialog[] dialogRef = new AlertDialog[1];
-        final int columns = 5;
-        for (int start = 1; start <= total; start += columns) {
-            LinearLayout line = new LinearLayout(this);
-            line.setOrientation(LinearLayout.HORIZONTAL);
-            int end = Math.min(start + columns, total + 1);
-            for (int week = start; week < end; week++) {
-                final int targetWeek = week;
-                boolean isRealWeek = realValid && week == realWeek;
-                String number = String.valueOf(week);
-                TextView cell = new TextView(this);
-                SpannableString cellText = new SpannableString(
-                        isRealWeek ? number + "\n" + getString(R.string.main_today) : number);
-                if (isRealWeek) {
-                    cellText.setSpan(new RelativeSizeSpan(0.62f), number.length(), cellText.length(),
-                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                }
-                cell.setText(cellText);
-                cell.setTextSize(15);
-                cell.setTypeface(appTypeface(Typeface.BOLD));
-                cell.setIncludeFontPadding(false);
-                cell.setGravity(Gravity.CENTER);
-                cell.setContentDescription(getString(R.string.main_week_n, week) + (isRealWeek ? getString(R.string.main_this_week_suffix) : ""));
-                boolean isSelectedCell = week == selected;
-                cell.setTextColor(isSelectedCell ? Color.WHITE : primaryTextColor());
-                cell.setBackground(isSelectedCell
-                        ? interactiveButtonBackground(accentColor(), dp(14))
-                        : interactiveTranslucentBackground(tonalContainerColor(), dp(14)));
-                cell.setOnClickListener(view -> {
-                    if (dialogRef[0] != null) {
-                        dialogRef[0].dismiss();
+        refreshBrowseTimeZone();
+        if (isFinishing() || isDestroyed()) return;
+        ModalCoordinator.Token token = modalCoordinator.tryAcquire("week_picker");
+        if (token == null) return;
+        Bundle restored = pendingSettingsRestore;
+        pendingSettingsRestore = null;
+        final Runnable[] clearDraft = {() -> { }};
+        long browsed = pastelTimetable != null ? pastelBrowseDate
+                : WeekBrowseRules.selectWeek(calendarStartMillis(), calendarTotalWeeks(),
+                        displayedViewingWeek(), System.currentTimeMillis()).targetDateMillis;
+        android.app.Dialog dialog = WeekPickerDialog.create(this, isDarkMode, pastelAccent(),
+                calendarStartMillis(), calendarTotalWeeks(), browsed, new WeekPickerDialog.Actions() {
+                    @Override public void onSelect(WeekBrowseRules.Selection selection) {
+                        if (!isFinishing() && !isDestroyed()) browsePastelDate(selection.targetDateMillis);
                     }
-                    setViewingWeek(targetWeek);
-                });
-                LinearLayout.LayoutParams cellParams = new LinearLayout.LayoutParams(
-                        0, dp(46), 1f
-                );
-                cellParams.setMargins(dp(4), dp(4), dp(4), dp(4));
-                line.addView(cell, cellParams);
-            }
-            // 末行用占位 View 补齐列数，保持网格对齐
-            for (int pad = end; pad < start + columns; pad++) {
-                LinearLayout.LayoutParams spacerParams = new LinearLayout.LayoutParams(
-                        0, dp(46), 1f
-                );
-                spacerParams.setMargins(dp(4), dp(4), dp(4), dp(4));
-                line.addView(new View(this), spacerParams);
-            }
-            picker.addView(line, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            ));
-        }
-
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle(getString(R.string.main_choose_week))
-                .setView(pickerScroll)
-                .setNegativeButton(getString(R.string.action_close), null)
-                .create();
-        dialogRef[0] = dialog;
+                    @Override public void onFindDate() {
+                        if (!isFinishing() && !isDestroyed()) showPastelDatePicker();
+                    }
+                }, dismissed -> {
+                    clearDraft[0].run();
+                    modalCoordinator.dismissed(token);
+                    if (weekPickerDialog == dismissed) weekPickerDialog = null;
+                }, restored == null ? -1 : restored.getInt("scroll", -1));
         weekPickerDialog = dialog;
-        dialog.setOnDismissListener(d -> {
-            if (weekPickerDialog == dialog) {
-                weekPickerDialog = null;
-            }
+        clearDraft[0] = beginSettingsDraft(() -> {
+            if (!dialog.isShowing()) return null;
+            Bundle state = new Bundle();
+            state.putString("kind", "week_picker");
+            state.putInt("scroll", WeekPickerDialog.scrollPosition(dialog));
+            return state;
         });
-        dialog.show();
-        styleDialogWindow(dialog);
+        dialog.setOnCancelListener(d -> clearDraft[0].run());
+        try {
+            dialog.show();
+            modalCoordinator.opened(token);
+        } catch (RuntimeException failure) {
+            clearDraft[0].run();
+            if (weekPickerDialog == dialog) weekPickerDialog = null;
+            modalCoordinator.dismissed(token);
+            throw failure;
+        }
     }
 
     private void refreshTimedUi() {
+        refreshBrowseTimeZone();
         String currentSignature = temporalSignature();
         if (!TextUtils.equals(renderedTemporalSignature, currentSignature)) {
             render();
@@ -2617,7 +2699,173 @@ public class MainActivity extends AppCompatActivity {
         return null;
     }
 
+    private PastelCourseSheet newModalSheet() {
+        PastelCourseSheet sheet = new PastelCourseSheet(this, isDarkMode, pastelAccent(), modalCoordinator);
+        modalSheets.add(sheet);
+        sheet.onDismissed = () -> modalSheets.remove(sheet);
+        return sheet;
+    }
+
+    private boolean settingsOverlayVisible() {
+        return settingsOverlay != null && settingsOverlay.getParent() != null;
+    }
+
+    private boolean mayOpenModal() {
+        return !isFinishing() && !isDestroyed() && !settingsOverlayVisible() && modalCoordinator.canOpen();
+    }
+
+    private ModalCoordinator.Token acquireModal(String key) {
+        if (isFinishing() || isDestroyed() || settingsOverlayVisible()) return null;
+        return modalCoordinator.tryAcquire(key);
+    }
+
+    /**
+     * Shows a framework dialog as the single primary window. Do not replace its dismiss
+     * listener afterwards; pass {@code cleanup}. {@code successor} opens after it has closed.
+     */
+    private void showOwnedDialog(ModalCoordinator.Token token, android.app.Dialog dialog, boolean styled,
+                                 Runnable cleanup, Runnable successor) {
+        ownedDialogs.add(dialog);
+        try {
+            OwnedDialog.show(modalCoordinator, token, dialog, () -> {
+                ownedDialogs.remove(dialog);
+                if (cleanup != null) cleanup.run();
+            }, successor);
+        } catch (RuntimeException failure) {
+            ownedDialogs.remove(dialog);
+            throw failure;
+        }
+        if (styled && dialog instanceof AlertDialog) styleDialogWindow((AlertDialog) dialog);
+        else AppFonts.install(dialog);
+    }
+
+    /** All first deliveries and restored flows use the same foreground/overlay gate. */
+    private void drainDeferredModals() {
+        if (restoringInteractions || activityRecreating || !activityResumed || !mayOpenModal()) return;
+        if (settingsReturnPending && pendingSettingsRestore == null
+                && (calendarDraft == null || calendarDraft.finished)
+                && (importFlow == null || importFlow.stage() == ImportFlowState.Stage.DONE)) {
+            showSettingsDialogV2();
+            return;
+        }
+        if (calendarDraft != null && !calendarDraft.finished) {
+            showCalendarImportDialog(calendarDraft.firstRun);
+        } else if (importFlow != null && importFlow.stage() != ImportFlowState.Stage.DONE) {
+            resumeImportFlow();
+        } else if (!pendingReminderPopups.isEmpty()) {
+            showNextReminderPopup();
+        }
+    }
+
+    private void resumeImportFlow() {
+        if (restoringInteractions || !activityResumed || !mayOpenModal() || importFlow == null) return;
+        switch (importFlow.stage()) {
+            case REVIEW: showImportReview(importFlow); break;
+            case PERIODS: showPeriodSettingsDialog(); break;
+            case RESULT: showImportResult(importFlow); break;
+            case CALENDAR: maybePromptCalendarSetup(); break;
+            default: break;
+        }
+    }
+
+    private void cancelImportWindow(ImportFlowState flow, ImportFlowState.Stage expected) {
+        if (!destroyingActivity && importFlow == flow && flow.stage() == expected) {
+            flow.finish();
+            importFlow = null;
+        }
+    }
+
+    private void showOverlappingCourses(long[] ids) {
+        if (!mayOpenModal()) return;
+        List<Course> choices = new ArrayList<>();
+        for (long id : ids) {
+            Course course = findCourseById(id);
+            if (course != null) choices.add(course);
+        }
+        if (choices.isEmpty()) return;
+        ModalCoordinator.Token token = acquireModal("overlap_courses");
+        if (token == null) return;
+        CharSequence[] labels = new CharSequence[choices.size()];
+        for (int i = 0; i < choices.size(); i++) {
+            Course course = choices.get(i);
+            labels[i] = course.name + "\n" + course.periodLabel() + " · " + periodRangeTime(course)
+                    + (course.room == null || course.room.isEmpty() ? "" : " · " + course.room);
+        }
+        Runnable draftCleanup = beginSettingsDraft(() -> {
+            Bundle state = new Bundle();
+            state.putString("kind", "overlap_courses");
+            state.putLongArray("ids", ids.clone());
+            return state;
+        });
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.overlap_courses_title)
+                .setItems(labels, (d, which) -> {
+                    draftCleanup.run();
+                    long id = choices.get(which).id;
+                    modalCoordinator.switchAfterDismiss(token, () -> {
+                        Course latest = findCourseById(id);
+                        if (latest != null) showPastelCourseDetail(latest);
+                    });
+                })
+                .setNegativeButton(R.string.action_cancel, null).create();
+        try {
+            showOwnedDialog(token, dialog, true, draftCleanup, null);
+        } catch (RuntimeException failure) {
+            draftCleanup.run();
+            throw failure;
+        }
+    }
+
+    private void showOverlappingEvents(long[] ids) {
+        if (!mayOpenModal() || !displayMode.showsEvents() || ids == null) return;
+        List<PersonalEvent> choices = new ArrayList<>();
+        java.util.Set<Long> seen = new java.util.HashSet<>();
+        for (long id : ids) {
+            PersonalEvent event = findPersonalEvent(id);
+            if (event != null && event.showInTimetable && seen.add(id)) choices.add(event);
+        }
+        if (choices.isEmpty()) return;
+        ModalCoordinator.Token token = acquireModal("overlap_events");
+        if (token == null) return;
+        eventFromMine = false;
+        CharSequence[] labels = new CharSequence[choices.size()];
+        long[] choiceIds = new long[choices.size()];
+        for (int i = 0; i < choices.size(); i++) {
+            PersonalEvent event = choices.get(i);
+            choiceIds[i] = event.id;
+            labels[i] = event.title + "\n" + event.timeLabel()
+                    + (TextUtils.isEmpty(event.location) ? "" : " · " + event.location);
+        }
+        Runnable draftCleanup = beginSettingsDraft(() -> {
+            Bundle state = new Bundle();
+            state.putString("kind", "overlap_events");
+            state.putLongArray("ids", choiceIds.clone());
+            return state;
+        });
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.agenda_timeline_events_title)
+                .setItems(labels, (d, which) -> {
+                    draftCleanup.run();
+                    long id = choiceIds[which];
+                    modalCoordinator.switchAfterDismiss(token, () -> {
+                        PersonalEvent latest = findPersonalEvent(id);
+                        if (latest != null) {
+                            eventFromMine = false;
+                            showPersonalEventDetail(latest);
+                        }
+                    });
+                })
+                .setNegativeButton(R.string.action_cancel, null).create();
+        try {
+            showOwnedDialog(token, dialog, true, draftCleanup, null);
+        } catch (RuntimeException failure) {
+            draftCleanup.run();
+            throw failure;
+        }
+    }
+
     private void showPastelCourseDetail(Course course) {
+        if (!mayOpenModal()) return;
         PastelCourseSheet.Detail detail = new PastelCourseSheet.Detail();
         detail.name = course.name;
         detail.dayLabel = dayNames[clamp(course.day, 0, 6)];
@@ -2628,32 +2876,61 @@ public class MainActivity extends AppCompatActivity {
         detail.teacher = course.teacher;
         detail.color = course.color;
         final long id = course.id;
-        new PastelCourseSheet(this, isDarkMode, pastelAccent()).showDetail(detail, () -> {
+        PastelCourseSheet sheet = newModalSheet();
+        activeCourseDetail = sheet;
+        activeCourseDetailId = id;
+        sheet.showDetail(detail, () -> {
+            activeCourseDetail = null;
+            activeCourseDetailId = 0;
             Course latest = findCourseById(id);
             if (latest != null) showPastelCourseEditor(latest, latest.day, latest.period);
+        }, () -> {
+            if (activeCourseDetail == sheet) {
+                activeCourseDetail = null;
+                activeCourseDetailId = 0;
+            }
         });
     }
 
     /** Pastel editor; validation and persistence match {@link #showCourseDialog(Course)}. */
     private void showPastelCourseEditor(Course editing, int day, int period) {
+        if (!mayOpenModal()) return;
         int displayedWeek = AgendaDates.week(calendarStartMillis(), pastelDisplayedStart());
         if (editing == null && pendingCourseRestore == null
                 && (displayedWeek < 1 || displayedWeek > calendarTotalWeeks())) {
-            AppFonts.install(new AlertDialog.Builder(this)
+            ModalCoordinator.Token token = modalCoordinator.tryAcquire("outside_term");
+            if (token == null) return;
+            AlertDialog prompt = new AlertDialog.Builder(this)
                     .setTitle(getString(R.string.main_outside_term_title))
                     .setMessage(getString(R.string.main_outside_term_message))
-                    .setPositiveButton(getString(R.string.main_add_personal_event), (dialog, which) -> {
-                        eventFromMine = false;
-                        showPersonalEventEditor(null);
-                    })
-                    .setNeutralButton(getString(R.string.main_add_term_course), (dialog, which) -> openPastelCourseEditor(null, day, period))
-                    .setNegativeButton(getString(R.string.action_cancel), null).show());
+                    .setPositiveButton(getString(R.string.main_add_personal_event), (dialog, which) ->
+                            modalCoordinator.switchAfterDismiss(token, () -> {
+                                eventFromMine = false;
+                                showPersonalEventEditor(null);
+                            }))
+                    .setNeutralButton(getString(R.string.main_add_term_course), (dialog, which) ->
+                            modalCoordinator.switchAfterDismiss(token, () -> openPastelCourseEditor(null, day, period)))
+                    .setNegativeButton(getString(R.string.action_cancel), null).create();
+            outsideTermDialog = prompt;
+            prompt.setOnDismissListener(d -> {
+                if (outsideTermDialog == prompt) outsideTermDialog = null;
+                modalCoordinator.dismissed(token);
+            });
+            try {
+                prompt.show();
+                modalCoordinator.opened(token);
+                AppFonts.install(prompt);
+            } catch (RuntimeException failure) {
+                modalCoordinator.dismissed(token);
+                throw failure;
+            }
             return;
         }
         openPastelCourseEditor(editing, day, period);
     }
 
     private void openPastelCourseEditor(Course editing, int day, int period) {
+        if (!mayOpenModal()) return;
         if (storageLocked) {
             Toast.makeText(this, getString(R.string.main_locked_cannot_save), Toast.LENGTH_LONG).show();
             return;
@@ -2676,7 +2953,7 @@ public class MainActivity extends AppCompatActivity {
             draft.end = period;
             draft.color = chooseCourseColorForDay(day, id);
         }
-        PastelCourseSheet sheet = new PastelCourseSheet(this, isDarkMode, pastelAccent());
+        PastelCourseSheet sheet = newModalSheet();
         activeCourseEditor = sheet;
         activeCourseId = isEditing ? id : 0;
         Bundle restored = pendingCourseRestore;
@@ -2731,8 +3008,8 @@ public class MainActivity extends AppCompatActivity {
         List<Course> candidate = copyCourses();
         upsertCourse(candidate, draft, d.colorManuallySelected);
         if (!saveCourses(candidate)) return getString(R.string.main_save_failed_retry);
-        selectedDay = draft.day;
-        if (visibleWeek > 0) browsePastelDate(courseDateMillisForWeek(draft.day, visibleWeek));
+        if (displayMode.showsCourses()) selectedDay = draft.day;
+        if (displayMode.showsCourses() && visibleWeek > 0) browsePastelDate(courseDateMillisForWeek(draft.day, visibleWeek));
         else render();
         Toast.makeText(this, editing != null ? getString(R.string.main_changes_saved) : getString(R.string.main_added_to_timetable), Toast.LENGTH_SHORT).show();
         return null;
@@ -2750,6 +3027,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showCourseDialog(Course editing) {
+        ModalCoordinator.Token token = acquireModal("classic_course");
+        if (token == null) return;
         final Bundle restored = pendingSettingsRestore != null
                 && "classic_course".equals(pendingSettingsRestore.getString("kind"))
                 ? pendingSettingsRestore : null;
@@ -2980,7 +3259,7 @@ public class MainActivity extends AppCompatActivity {
             dialog.setButton(AlertDialog.BUTTON_NEUTRAL, getString(R.string.action_delete), (d, which) -> { });
         }
 
-        trackSettingsDraft(dialog, () -> {
+        Runnable draftCleanup = beginSettingsDraft(() -> {
             Bundle state = new Bundle();
             state.putString("kind", "classic_course");
             state.putLong("id", isEditing ? editing.id : 0L);
@@ -3002,9 +3281,13 @@ public class MainActivity extends AppCompatActivity {
             state.putInt("scroll", formScroll.getScrollY());
             return state;
         });
-        dialog.show();
+        try {
+            showOwnedDialog(token, dialog, true, draftCleanup, null);
+        } catch (RuntimeException failure) {
+            draftCleanup.run();
+            throw failure;
+        }
         if (dialog.getWindow() != null) dialog.getWindow().setBackgroundDrawable(editorStyle.getBackground());
-        styleDialogWindow(dialog);
         if (restored != null) formScroll.post(() -> formScroll.scrollTo(0, Math.max(0, restored.getInt("scroll", 0))));
     }
 
@@ -3057,29 +3340,95 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean dismissSettingsOverlay() {
-        View overlay = settingsOverlay;
-        if (overlay == null || overlay.getParent() == null) return false;
-        ((ViewGroup) overlay.getParent()).removeView(overlay);
-        settingsOverlay = null;
+        if (!settingsOverlayVisible()) return false;
+        captureSettingsPosition(null);
+        settingsReturnPending = false;
+        detachSettingsOverlay();
         return true;
     }
 
+    private void detachSettingsOverlay() {
+        View overlay = settingsOverlay;
+        if (overlay != null && overlay.getParent() instanceof ViewGroup)
+            ((ViewGroup) overlay.getParent()).removeView(overlay);
+        settingsOverlay = null;
+        settingsScroller = null;
+        uiHandler.post(this::drainDeferredModals);
+    }
+
+    private void openSettingsChild(String rowKey, Runnable open) {
+        captureSettingsPosition("settings:row:" + rowKey);
+        settingsReturnPending = true;
+        detachSettingsOverlay();
+        open.run();
+        uiHandler.post(this::drainDeferredModals);
+    }
+
+    private int settingsRowTop(View row) {
+        ViewGroup content = (ViewGroup) settingsScroller.getChildAt(0);
+        android.graphics.Rect bounds = new android.graphics.Rect(0, 0, row.getWidth(), row.getHeight());
+        content.offsetDescendantRectToMyCoords(row, bounds);
+        return bounds.top;
+    }
+
+    private View firstVisibleSettingsRow(View view) {
+        Object tag = view.getTag();
+        if (tag instanceof String && ((String) tag).startsWith("settings:row:")
+                && settingsRowTop(view) + view.getHeight() > settingsScroller.getScrollY()) return view;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View result = firstVisibleSettingsRow(group.getChildAt(i));
+                if (result != null) return result;
+            }
+        }
+        return null;
+    }
+
+    private void captureSettingsPosition(String preferredTag) {
+        if (settingsScroller == null || settingsScroller.getChildCount() == 0) return;
+        settingsScrollPosition = settingsScroller.getScrollY();
+        View anchor = preferredTag == null ? null : settingsScroller.findViewWithTag(preferredTag);
+        if (anchor == null) anchor = firstVisibleSettingsRow(settingsScroller.getChildAt(0));
+        settingsScrollAnchor = anchor == null ? null : String.valueOf(anchor.getTag());
+        settingsScrollOffsetDp = anchor == null ? 0 : (settingsRowTop(anchor) - settingsScrollPosition)
+                / getResources().getDisplayMetrics().density;
+    }
+
+    private void restoreSettingsPosition(ScrollView scroller) {
+        final boolean[] restored = {false};
+        Runnable restore = () -> {
+            if (restored[0] || settingsScroller != scroller || scroller.getHeight() <= 0
+                    || scroller.getChildAt(0).getHeight() <= 0) return;
+            restored[0] = true;
+            View anchor = settingsScrollAnchor == null ? null : scroller.findViewWithTag(settingsScrollAnchor);
+            int target = anchor == null ? settingsScrollPosition
+                    : settingsRowTop(anchor) - Math.round(settingsScrollOffsetDp * getResources().getDisplayMetrics().density);
+            scroller.scrollTo(0, Math.max(0, target));
+        };
+        scroller.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override public void onLayoutChange(View v, int l, int t, int r, int b,
+                                                 int ol, int ot, int or, int ob) {
+                restore.run();
+                if (restored[0]) scroller.removeOnLayoutChangeListener(this);
+            }
+        });
+        scroller.post(restore);
+    }
+
     private void showSettingsDialogV2() {
-        if (settingsOverlay != null && settingsOverlay.getParent() != null) {
-            settingsOverlay.requestFocus();
-            return;
-        }
+        if (settingsOverlayVisible()) { settingsOverlay.requestFocus(); return; }
+        if (!mayOpenModal() || activityRecreating) return;
         ViewGroup contentRoot = findViewById(android.R.id.content);
-        if (contentRoot == null) {
-            return;
-        }
-        final FrameLayout overlay = new FrameLayout(this);
-        overlay.setBackgroundColor(isDarkMode ? Color.argb(116, 0, 0, 0) : Color.argb(82, 0, 0, 0));
+        if (contentRoot == null) return;
+        UiSemanticPalette colors = semanticColors();
+        FrameLayout overlay = new FrameLayout(this);
+        overlay.setTag("settings:overlay");
+        overlay.setBackgroundColor(isDarkMode ? Color.argb(176, 6, 8, 12) : Color.argb(82, 0, 0, 0));
         overlay.setClickable(true);
         overlay.setFocusable(true);
         overlay.setFocusableInTouchMode(true);
-        // Size against the actual window (including split screen), not display metrics.
-        final int outerMargin = dp(14);
+        int outerMargin = dp(14);
         overlay.setPadding(outerMargin, outerMargin, outerMargin, outerMargin);
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(overlay, (view, insets) -> {
             androidx.core.graphics.Insets safe = insets.getInsets(
@@ -3089,176 +3438,169 @@ public class MainActivity extends AppCompatActivity {
                     outerMargin + safe.right, outerMargin + safe.bottom);
             return insets;
         });
-        final Runnable[] dismissSettings = new Runnable[1];
-        dismissSettings[0] = this::dismissSettingsOverlay;
-        overlay.setOnClickListener(view -> dismissSettings[0].run());
+        overlay.setOnClickListener(view -> dismissSettingsOverlay());
         overlay.setOnKeyListener((view, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
-                    && event.getAction() == android.view.KeyEvent.ACTION_UP) {
-                dismissSettings[0].run();
-                return true;
-            }
+                    && event.getAction() == android.view.KeyEvent.ACTION_UP) return dismissSettingsOverlay();
             return false;
         });
 
-        LinearLayout glassPanel = new AdaptiveSettingsPanel(this);
-        glassPanel.setPadding(dp(20), dp(18), dp(20), dp(18));
-        glassPanel.setBackground(glassPanelBackground(dp(26)));
-        glassPanel.setClickable(true);
-        glassPanel.setFocusable(true);
-        glassPanel.setOnClickListener(view -> {
-        });
-        glassPanel.setElevation(dp(24));
-        glassPanel.setTranslationZ(dp(3));
-        glassPanel.setOutlineProvider(new android.view.ViewOutlineProvider() {
-            @Override
-            public void getOutline(View view, android.graphics.Outline outline) {
-                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(28));
-            }
-        });
-
+        LinearLayout settingsPanel = new AdaptiveSettingsPanel(this);
+        settingsPanel.setPadding(dp(16), dp(16), dp(16), dp(12));
+        settingsPanel.setBackground(buttonBackground(colors.background, dp(26)));
+        settingsPanel.setClickable(true);
+        settingsPanel.setElevation(dp(20));
         LinearLayout titleRow = new LinearLayout(this);
-        titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        titleRow.setPadding(dp(2), 0, 0, dp(10));
-
-        TextView title = new TextView(this);
-        title.setText(getString(R.string.main_settings));
-        title.setTextSize(22);
-        title.setTypeface(appTypeface(Typeface.BOLD));
-        title.setTextColor(primaryTextColor());
-        title.setIncludeFontPadding(false);
-        titleRow.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView close = new TextView(this);
-        close.setText(getString(R.string.action_close));
-        close.setTextSize(13);
-        close.setTypeface(appTypeface(Typeface.BOLD));
-        close.setTextColor(accentColor());
+        titleRow.setPadding(dp(4), 0, 0, dp(8));
+        TextView title = settingsText(getString(R.string.main_settings), 22, colors.text, true);
+        titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView close = settingsText(getString(R.string.action_close), 13, colors.accent, true);
+        close.setTag("settings:close");
         close.setGravity(Gravity.CENTER);
         close.setMinWidth(dp(58));
-        close.setMinHeight(dp(38));
         close.setPadding(dp(12), 0, dp(12), 0);
-        close.setBackground(interactiveGlassSurfaceBackground(glassControlColor(), dp(18)));
-        close.setClickable(true);
-        close.setFocusable(true);
-        close.setOnClickListener(view -> dismissSettings[0].run());
-        titleRow.addView(close, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)));
-        glassPanel.addView(titleRow);
+        close.setBackground(rippleBackground(colors.inset, withAlpha(colors.accent, 36), dp(16), Color.TRANSPARENT));
+        close.setOnClickListener(view -> dismissSettingsOverlay());
+        titleRow.addView(close, new LinearLayout.LayoutParams(-2, dp(48)));
+        settingsPanel.addView(titleRow);
 
         ScrollView scroller = new ScrollView(this);
+        scroller.setTag("settings:scroll");
         scroller.setFillViewport(false);
         scroller.setVerticalScrollBarEnabled(false);
         scroller.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(2), dp(4), dp(2), 0);
+        panel.setPadding(dp(2), 0, dp(2), dp(4));
         scroller.addView(panel);
 
-        panel.addView(settingsSectionLabel(getString(R.string.main_section_timetable)));
-        panel.addView(settingsMenuRow(R.drawable.ic_file_text, getString(R.string.main_import_pdf), getString(R.string.main_import_pdf_summary), accentColor(), view -> {
-            dismissSettings[0].run();
-            openPdfPicker();
-        }), settingsRowParams());
-        panel.addView(settingsMenuRow(R.drawable.ic_file_text, getString(R.string.main_paste_import), getString(R.string.main_paste_import_summary), accentColor(), view -> {
-            dismissSettings[0].run();
-            showPasteImport();
-        }), settingsRowParams());
+        addSettingsGroup(panel, "display", getString(R.string.display_mode_section),
+                getString(R.string.settings_display_footer),
+                settingsChildRow("display_mode", R.drawable.ic_calendar_outline,
+                        getString(R.string.display_mode_title), displayModeLabel(displayMode), this::showDisplayModeDialog));
 
+        View importFile = settingsMenuRow(R.drawable.ic_file_text, getString(R.string.main_import_pdf), "",
+                colors.secondary, view -> { dismissSettingsOverlay(); openPdfPicker(); });
+        importFile.setTag("settings:row:import_file");
+        View paste = settingsMenuRow(R.drawable.ic_file_text, getString(R.string.main_paste_import), "",
+                colors.secondary, view -> { dismissSettingsOverlay(); showPasteImport(); });
+        paste.setTag("settings:row:paste");
+        addSettingsGroup(panel, "timetable", getString(R.string.main_section_timetable),
+                getString(R.string.settings_import_footer), importFile, paste);
+
+        ArrayList<View> reminders = new ArrayList<>();
+        reminders.add(settingsChildRow("reminder_status", R.drawable.ic_bell,
+                getString(R.string.main_notification_status), notificationStatusText(), this::showReminderStatusDialog));
+        View reminderToggle = settingsToggleRow(R.drawable.ic_bell, getString(R.string.main_reminders), "",
+                colors.secondary, notificationsEnabled(), (button, checked) -> {
+                    applyNotificationToggle(checked);
+                    refreshSettingsReminderStatus();
+                });
+        reminderToggle.setTag("settings:row:reminders");
+        reminders.add(reminderToggle);
         if (BuildConfig.ENABLE_TEST_COURSE) {
-            panel.addView(settingsMenuRow(R.drawable.ic_bell, getString(R.string.main_test_reminder), getString(R.string.main_test_reminder_summary), accentColor(), view -> {
-                dismissSettings[0].run();
-                sendDebugReminderTestNotification();
-            }), settingsRowParams());
+            View testReminder = settingsMenuRow(R.drawable.ic_bell, getString(R.string.main_test_reminder), "",
+                    colors.secondary, view -> { dismissSettingsOverlay(); sendDebugReminderTestNotification(); });
+            testReminder.setTag("settings:row:test_reminder");
+            reminders.add(testReminder);
         }
-        panel.addView(settingsMenuRow(
-                R.drawable.ic_bell,
-                getString(R.string.main_notification_status),
-                notificationStatusText(),
-                accentColor(),
-                view -> {
-                    dismissSettings[0].run();
-                    openReminderSystemSettings();
-                }
-        ), settingsRowParams());
+        addSettingsGroup(panel, "reminders", getString(R.string.settings_reminders_section),
+                getString(R.string.main_reminders_summary), reminders.toArray(new View[0]));
 
-        panel.addView(settingsToggleRow(
-                R.drawable.ic_bell,
-                getString(R.string.main_reminders),
-                getString(R.string.main_reminders_summary),
-                accentColor(),
-                notificationsEnabled(),
-                (buttonView, isChecked) -> applyNotificationToggle(isChecked)
-        ), settingsRowParams());
+        addSettingsGroup(panel, "time", getString(R.string.main_section_time), getString(R.string.settings_time_footer),
+                settingsChildRow("periods", R.drawable.ic_clock_outline, getString(R.string.main_period_settings),
+                        getResources().getQuantityString(R.plurals.settings_period_count, periodCount(), periodCount()), this::showPeriodSettingsDialog),
+                settingsChildRow("calendar", R.drawable.ic_calendar_outline, getString(R.string.main_calendar_settings),
+                        formatDate(calendarStartMillis()) + " – " + formatDate(calendarEndMillis()),
+                        () -> showCalendarImportDialog(false)));
 
-        panel.addView(settingsSectionLabel(getString(R.string.main_section_time)));
-        panel.addView(settingsMenuRow(R.drawable.ic_clock_outline, getString(R.string.main_period_settings), getString(R.string.main_period_settings_summary), accentColor(), view -> {
-            dismissSettings[0].run();
-            showPeriodSettingsDialog();
-        }), settingsRowParams());
-        panel.addView(settingsMenuRow(R.drawable.ic_calendar_outline, getString(R.string.main_calendar_settings), getString(R.string.main_calendar_settings_summary), accentColor(), view -> {
-            dismissSettings[0].run();
-            showCalendarImportDialog(false);
-        }), settingsRowParams());
-
-        panel.addView(settingsSectionLabel(getString(R.string.main_section_appearance)));
+        ArrayList<View> appearance = new ArrayList<>();
+        appearance.add(settingsChildRow("theme", isDarkMode ? R.drawable.ic_moon_outline : R.drawable.ic_sun_outline,
+                getString(R.string.main_theme_mode_title), themeModeLabel(themeMode), this::showThemeModeDialog));
+        appearance.add(settingsChildRow("accent", R.drawable.ic_palette_outline, getString(R.string.main_accent_title),
+                UiAccentPalette.name(accentPresetIndex()), this::showAccentColorDialog));
+        appearance.add(settingsChildRow("font", R.drawable.ic_file_text, getString(R.string.main_font_title),
+                getString(R.string.settings_font_value, AppFonts.currentName(this), AppFonts.sizePercent(this)), this::showFontDialog));
+        appearance.add(settingsChildRow("language", R.drawable.ic_file_text, getString(R.string.language_title),
+                AppLanguage.currentName(this), this::showLanguageDialog));
         if (BuildConfig.PASTEL_UI) {
-            panel.addView(settingsToggleRow(
-                    R.drawable.ic_file_text,
-                    getString(R.string.main_show_teacher),
-                    getString(R.string.main_show_teacher_summary),
-                    accentColor(),
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(SHOW_TEACHER_KEY, false),
-                    (buttonView, isChecked) -> {
-                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-                                .putBoolean(SHOW_TEACHER_KEY, isChecked).apply();
+            View teacher = settingsToggleRow(R.drawable.ic_file_text, getString(R.string.main_show_teacher), "",
+                    colors.secondary, getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(SHOW_TEACHER_KEY, false),
+                    (button, checked) -> {
+                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(SHOW_TEACHER_KEY, checked).apply();
                         render();
-                    }
-            ), settingsRowParams());
+                    });
+            teacher.setTag("settings:row:teacher");
+            appearance.add(teacher);
         }
-        panel.addView(settingsMenuRow(R.drawable.ic_palette_outline, getString(R.string.main_randomize_colors), getString(R.string.main_randomize_colors_summary), accentColor(), view -> {
-            dismissSettings[0].run();
-            confirmRandomizeCourseColors();
-        }), settingsRowParams());
-        panel.addView(settingsMenuRow(R.drawable.ic_palette_outline, getString(R.string.main_accent_title), getString(R.string.main_accent_summary), accentColor(), view -> {
-            showAccentColorDialog();
-        }), settingsRowParams());
-        panel.addView(settingsMenuRow(R.drawable.ic_file_text, getString(R.string.main_font_title), getString(R.string.font_settings_summary, AppFonts.currentName(this), AppFonts.sizePercent(this)), accentColor(), view -> {
-            dismissSettings[0].run();
-            showFontDialog();
-        }), settingsRowParams());
-        panel.addView(settingsMenuRow(R.drawable.ic_file_text, getString(R.string.language_title),
-                getString(R.string.language_summary, AppLanguage.currentName(this)), accentColor(), view -> {
-            dismissSettings[0].run();
-            showLanguageDialog();
-        }), settingsRowParams());
+        appearance.add(settingsChildRow("course_colors", R.drawable.ic_palette_outline,
+                getString(R.string.main_randomize_colors), "", this::confirmRandomizeCourseColors));
+        addSettingsGroup(panel, "appearance", getString(R.string.main_section_appearance),
+                getString(R.string.settings_appearance_footer), appearance.toArray(new View[0]));
 
-        panel.addView(settingsSectionLabel(getString(R.string.main_section_data)));
-        panel.addView(settingsMenuRow(R.drawable.ic_trash_outline, getString(R.string.main_delete_config), getString(R.string.main_delete_config_summary), dangerColor(), view -> {
-            dismissSettings[0].run();
-            confirmDeleteCurrentConfiguration();
-        }), settingsRowParams());
+        View delete = settingsMenuRow(R.drawable.ic_trash_outline, getString(R.string.main_delete_config), "",
+                colors.error, view -> openSettingsChild("delete", this::confirmDeleteCurrentConfiguration));
+        delete.setTag("settings:row:delete");
+        addSettingsGroup(panel, "data", getString(R.string.main_section_data),
+                getString(R.string.main_delete_config_summary), delete);
 
-        glassPanel.addView(scroller, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                1f
-        ));
-
-        FrameLayout.LayoutParams glassParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER
-        );
-        overlay.addView(glassPanel, glassParams);
-        contentRoot.addView(overlay, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
+        settingsPanel.addView(scroller, new LinearLayout.LayoutParams(-1, -2, 1f));
+        overlay.addView(settingsPanel, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+        contentRoot.addView(overlay, new ViewGroup.LayoutParams(-1, -1));
         settingsOverlay = overlay;
+        settingsScroller = scroller;
+        settingsReturnPending = false;
+        AppFonts.install(overlay);
         androidx.core.view.ViewCompat.requestApplyInsets(overlay);
         overlay.requestFocus();
+        restoreSettingsPosition(scroller);
+    }
+
+    private View settingsChildRow(String key, int icon, String title, String value, Runnable open) {
+        View row = settingsMenuRow(icon, title, value, semanticColors().secondary,
+                view -> openSettingsChild(key, open));
+        row.setTag("settings:row:" + key);
+        return row;
+    }
+
+    private void refreshSettingsReminderStatus() {
+        if (settingsOverlay == null) return;
+        View row = settingsOverlay.findViewWithTag("settings:row:reminder_status");
+        if (row == null) return;
+        TextView value = row.findViewWithTag("settings:value");
+        String status = notificationStatusText();
+        value.setText(status);
+        row.setContentDescription(getString(R.string.main_title_subtitle_desc,
+                getString(R.string.main_notification_status), status));
+    }
+
+    private void addSettingsGroup(LinearLayout parent, String key, String title, String footer, View... rows) {
+        parent.addView(settingsSectionLabel(title));
+        LinearLayout group = new LinearLayout(this);
+        group.setTag("settings:section:" + key);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setBackground(buttonBackground(semanticColors().surface, dp(18)));
+        group.setClipToOutline(true);
+        for (int i = 0; i < rows.length; i++) {
+            if (i > 0) {
+                View divider = new View(this);
+                divider.setBackgroundColor(semanticColors().divider);
+                divider.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                LinearLayout.LayoutParams rule = new LinearLayout.LayoutParams(-1,
+                        Math.max(1, Math.round(.5f * getResources().getDisplayMetrics().density)));
+                rule.leftMargin = dp(44); rule.rightMargin = dp(12);
+                group.addView(divider, rule);
+            }
+            group.addView(rows[i], new LinearLayout.LayoutParams(-1, -2));
+        }
+        parent.addView(group, new LinearLayout.LayoutParams(-1, -2));
+        if (footer != null && !footer.isEmpty()) {
+            TextView description = settingsText(footer, 12, semanticColors().secondary, false);
+            description.setTag("settings:description");
+            description.setPadding(dp(10), dp(7), dp(10), dp(8));
+            parent.addView(description, new LinearLayout.LayoutParams(-1, -2));
+        }
     }
 
     private void confirmRandomizeCourseColors() {
@@ -3273,6 +3615,8 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, getString(R.string.main_no_courses_to_color), Toast.LENGTH_LONG).show();
             return;
         }
+        ModalCoordinator.Token token = acquireModal("randomize_colors");
+        if (token == null) return;
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(getString(R.string.main_randomize_colors))
                 .setMessage(getString(R.string.main_randomize_message))
@@ -3286,18 +3630,20 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(this, getResources().getQuantityString(R.plurals.main_randomized_count, count, count), Toast.LENGTH_SHORT).show();
                 })
                 .create();
-        dialog.show();
-        styleDialogWindow(dialog);
+        showOwnedDialog(token, dialog, true, null, null);
     }
 
-    private void trackSettingsDraft(AlertDialog dialog, SettingsDraftCapture capture) {
+    /** Registers a draft for state saving; run the returned cleanup when its window closes. */
+    private Runnable beginSettingsDraft(SettingsDraftCapture capture) {
         settingsDraftCapture = capture;
-        dialog.setOnDismissListener(ignored -> {
+        return () -> {
             if (settingsDraftCapture == capture) settingsDraftCapture = null;
-        });
+        };
     }
 
     private void showFontDialog() {
+        ModalCoordinator.Token token = acquireModal("font");
+        if (token == null) return;
         Bundle restored = pendingSettingsRestore;
         pendingSettingsRestore = null;
         String current = restored != null ? restored.getString("font", AppFonts.current(this)) : AppFonts.current(this);
@@ -3310,11 +3656,15 @@ public class MainActivity extends AppCompatActivity {
         panel.setPadding(dp(20), dp(4), dp(20), dp(12));
         RadioGroup fonts = new RadioGroup(this);
         fonts.setOrientation(RadioGroup.VERTICAL);
+        int[][] choiceStates = {{android.R.attr.state_checked}, {}};
+        ColorStateList radioTint = new ColorStateList(choiceStates,
+                new int[]{accentColor(), secondaryTextColor()});
         for (int i = 0; i < AppFonts.IDS.length; i++) {
             RadioButton choice = new RadioButton(this);
             choice.setId(View.generateViewId());
             choice.setText(AppFonts.label(this, i));
             choice.setTextColor(primaryTextColor());
+            choice.setButtonTintList(radioTint);
             choice.setMinHeight(dp(48));
             fonts.addView(choice, new RadioGroup.LayoutParams(-1, -2));
             if (i == checked) fonts.check(choice.getId());
@@ -3334,6 +3684,9 @@ public class MainActivity extends AppCompatActivity {
         SeekBar slider = new SeekBar(this);
         slider.setMax((FontSizeRules.MAX - FontSizeRules.MIN) / FontSizeRules.STEP);
         slider.setProgress(FontSizeRules.toProgress(restored == null ? currentPercent : restored.getInt("percent", currentPercent)));
+        slider.setThumbTintList(ColorStateList.valueOf(accentColor()));
+        slider.setProgressTintList(ColorStateList.valueOf(accentColor()));
+        slider.setProgressBackgroundTintList(ColorStateList.valueOf(withAlpha(secondaryTextColor(), isDarkMode ? 76 : 56)));
         slider.setMinimumHeight(dp(48));
         panel.addView(slider, new LinearLayout.LayoutParams(-1, dp(48)));
         TextView preview = new TextView(this);
@@ -3376,15 +3729,19 @@ public class MainActivity extends AppCompatActivity {
                 .setNeutralButton(getString(R.string.main_reset_font_size), null)
                 .setPositiveButton(getString(R.string.action_ok), null)
                 .create();
-        dialog.show();
-        styleDialogWindow(dialog);
-        trackSettingsDraft(dialog, () -> {
+        Runnable draftCleanup = beginSettingsDraft(() -> {
             Bundle state = new Bundle();
             state.putString("kind", "font");
             state.putString("font", AppFonts.IDS[selected[0]]);
             state.putInt("percent", FontSizeRules.fromProgress(slider.getProgress()));
             return state;
         });
+        try {
+            showOwnedDialog(token, dialog, true, draftCleanup, null);
+        } catch (RuntimeException failure) {
+            draftCleanup.run();
+            throw failure;
+        }
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v ->
                 slider.setProgress(FontSizeRules.toProgress(FontSizeRules.DEFAULT)));
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
@@ -3399,27 +3756,43 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             dialog.dismiss();
-            recreate();
+            recreateSmoothly();
         });
     }
 
     private void showLanguageDialog() {
+        ModalCoordinator.Token token = acquireModal("language");
+        if (token == null) return;
+        Bundle restored = pendingSettingsRestore != null
+                && "language".equals(pendingSettingsRestore.getString("kind")) ? pendingSettingsRestore : null;
+        if (restored != null) pendingSettingsRestore = null;
         String current = AppLanguage.current(this);
         int checked = 0;
         for (int i = 0; i < AppLanguage.IDS.length; i++) if (AppLanguage.IDS[i].equals(current)) checked = i;
-        final int[] selected = {checked};
+        final int[] selected = {restored == null ? checked
+                : clamp(restored.getInt("selected", checked), 0, AppLanguage.IDS.length - 1)};
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.language_title)
-                .setSingleChoiceItems(AppLanguage.names(this), checked, (d, which) -> selected[0] = which)
+                .setSingleChoiceItems(AppLanguage.names(this), selected[0], (d, which) -> selected[0] = which)
                 .setNegativeButton(R.string.action_cancel, null)
                 .setPositiveButton(R.string.action_ok, null)
                 .create();
-        dialog.show();
-        styleDialogWindow(dialog);
-        AppFonts.install(dialog);
+        Runnable draftCleanup = beginSettingsDraft(() -> {
+            Bundle state = new Bundle();
+            state.putString("kind", "language");
+            state.putInt("selected", selected[0]);
+            return state;
+        });
+        try {
+            showOwnedDialog(token, dialog, true, draftCleanup, null);
+        } catch (RuntimeException failure) {
+            draftCleanup.run();
+            throw failure;
+        }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             String id = AppLanguage.IDS[selected[0]];
             if (id.equals(AppLanguage.current(this))) {
+                draftCleanup.run();
                 dialog.dismiss();
                 return;
             }
@@ -3427,16 +3800,132 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, R.string.language_save_failed, Toast.LENGTH_LONG).show();
                 return;
             }
+            draftCleanup.run();
             dialog.dismiss();
-            recreate();
+            recreateSmoothly();
+        });
+    }
+
+    private void loadDisplayMode() {
+        try {
+            displayMode = DisplayMode.fromStoredValue(getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getString(DisplayMode.PREF_KEY, null));
+        } catch (ClassCastException invalidPreference) {
+            displayMode = DisplayMode.COMBINED;
+        }
+    }
+
+    private String displayModeLabel(DisplayMode mode) {
+        if (mode == DisplayMode.TIMETABLE) return getString(R.string.display_mode_timetable);
+        if (mode == DisplayMode.AGENDA) return getString(R.string.display_mode_agenda);
+        return getString(R.string.display_mode_combined);
+    }
+
+    private void showDisplayModeDialog() {
+        ModalCoordinator.Token token = acquireModal("display_mode");
+        if (token == null) return;
+        Bundle restored = pendingSettingsRestore != null
+                && "display_mode".equals(pendingSettingsRestore.getString("kind")) ? pendingSettingsRestore : null;
+        if (restored != null) pendingSettingsRestore = null;
+        DisplayMode[] modes = DisplayMode.values();
+        int[] selected = {restored == null ? displayMode.ordinal()
+                : clamp(restored.getInt("selected", displayMode.ordinal()), 0, modes.length - 1)};
+        String[] labels = new String[modes.length];
+        for (int i = 0; i < modes.length; i++) labels[i] = displayModeLabel(modes[i]);
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.display_mode_title)
+                .setSingleChoiceItems(labels, selected[0], (d, which) -> selected[0] = which)
+                .setNegativeButton(R.string.action_cancel, null)
+                .setPositiveButton(R.string.action_ok, null)
+                .create();
+        Runnable draftCleanup = beginSettingsDraft(() -> {
+            Bundle state = new Bundle();
+            state.putString("kind", "display_mode");
+            state.putInt("selected", selected[0]);
+            return state;
+        });
+        try {
+            showOwnedDialog(token, dialog, true, draftCleanup, null);
+        } catch (RuntimeException failure) {
+            draftCleanup.run();
+            throw failure;
+        }
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            DisplayMode chosen = modes[selected[0]];
+            if (chosen == displayMode) {
+                dialog.dismiss();
+                return;
+            }
+            if (!SafePreferences.commit(getSharedPreferences(PREFS_NAME, MODE_PRIVATE),
+                    new PreferenceTransaction().put(DisplayMode.PREF_KEY, chosen.storedValue))) {
+                Toast.makeText(this, R.string.display_mode_save_failed, Toast.LENGTH_LONG).show();
+                return;
+            }
+            displayMode = chosen;
+            dialog.dismiss();
+            render();
+        });
+    }
+
+    private void showThemeModeDialog() {
+        ModalCoordinator.Token token = acquireModal("theme_mode");
+        if (token == null) return;
+        Bundle restored = pendingSettingsRestore != null
+                && "theme_mode".equals(pendingSettingsRestore.getString("kind"))
+                ? pendingSettingsRestore : null;
+        if (restored != null) pendingSettingsRestore = null;
+        // Compare confirmation against the saved preference, not the restored tentative choice.
+        int checked = (themeMode == 1 || themeMode == 2) ? themeMode : 0;
+        final int[] selected = {restored == null ? checked
+                : clamp(restored.getInt("selected", checked), 0, 2)};
+        CharSequence[] options = {
+                getString(R.string.main_theme_follow_system),
+                getString(R.string.main_theme_light),
+                getString(R.string.main_theme_dark)
+        };
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.main_theme_mode_title)
+                .setSingleChoiceItems(options, selected[0], (d, which) -> selected[0] = which)
+                .setNegativeButton(R.string.action_cancel, null)
+                .setPositiveButton(R.string.action_ok, null)
+                .create();
+        Runnable draftCleanup = beginSettingsDraft(() -> {
+            Bundle state = new Bundle();
+            state.putString("kind", "theme_mode");
+            state.putInt("selected", selected[0]);
+            return state;
+        });
+        try {
+            showOwnedDialog(token, dialog, true, draftCleanup, null);
+        } catch (RuntimeException failure) {
+            draftCleanup.run();
+            throw failure;
+        }
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            int chosen = selected[0];
+            if (chosen == checked) {
+                dialog.dismiss();
+                return;
+            }
+            themeMode = chosen;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(THEME_KEY, chosen).apply();
+            dialog.dismiss();
+            applyAppNightMode();
+            recreateSmoothly();
         });
     }
 
     private void showAccentColorDialog() {
+        ModalCoordinator.Token token = acquireModal("accent");
+        if (token == null) return;
+        Bundle restored = pendingSettingsRestore != null
+                && "accent".equals(pendingSettingsRestore.getString("kind")) ? pendingSettingsRestore : null;
+        if (restored != null) pendingSettingsRestore = null;
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(4), dp(10), dp(4), dp(6));
-        int[] selected = new int[]{accentPresetIndex()};
+        int[] selected = {restored == null ? accentPresetIndex()
+                : clamp(restored.getInt("selected", accentPresetIndex()), 0, ACCENT_PRESETS.length - 1)};
         ScrollView scroller = new ScrollView(this);
         scroller.setFillViewport(false);
         int viewportHeight = Math.min(dp(420), Math.max(dp(100),
@@ -3453,23 +3942,38 @@ public class MainActivity extends AppCompatActivity {
                 .setPositiveButton(getString(R.string.action_ok), null)
                 .create();
         renderAccentChoices(panel, selected, dialog);
+        Runnable draftCleanup = beginSettingsDraft(() -> {
+            Bundle state = new Bundle();
+            state.putString("kind", "accent");
+            state.putInt("selected", selected[0]);
+            state.putInt("scroll", scroller.getScrollY());
+            return state;
+        });
         dialog.setOnShowListener(d -> {
             Button confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
             if (confirm != null) {
                 confirm.setOnClickListener(view -> {
                     int index = selected[0];
+                    draftCleanup.run();
                     if (index != accentPresetIndex()) {
                         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(ACCENT_KEY, index).apply();
                         dialog.dismiss();
-                        recreate();
+                        recreateSmoothly();
                     } else {
                         dialog.dismiss();
                     }
                 });
             }
         });
-        dialog.show();
-        styleDialogWindow(dialog);
+        try {
+            showOwnedDialog(token, dialog, true, draftCleanup, null);
+        } catch (RuntimeException failure) {
+            draftCleanup.run();
+            throw failure;
+        }
+        if (restored != null) scroller.post(() -> {
+            if (dialog.isShowing()) scroller.scrollTo(0, Math.max(0, restored.getInt("scroll", 0)));
+        });
     }
 
     private void renderAccentChoices(LinearLayout panel, int[] selected, AlertDialog dialog) {
@@ -3477,7 +3981,7 @@ public class MainActivity extends AppCompatActivity {
         final int columns = getResources().getConfiguration().screenWidthDp < 360
                 || getResources().getConfiguration().fontScale > 1.25f ? 3 : 4;
         TextView hint = new TextView(this);
-        hint.setText(R.string.accent_palette_hint);
+        hint.setText(getString(R.string.accent_palette_hint, ACCENT_PRESETS.length));
         hint.setTextSize(12);
         hint.setTextColor(secondaryTextColor());
         hint.setPadding(dp(8), 0, dp(8), dp(8));
@@ -3549,166 +4053,114 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private TextView settingsSectionLabel(String text) {
-        TextView label = new TextView(this);
-        label.setText(text);
-        label.setTextSize(12);
-        label.setTypeface(appTypeface(Typeface.BOLD));
-        label.setLetterSpacing(0.08f);
-        label.setTextColor(secondaryTextColor());
-        label.setGravity(Gravity.CENTER_VERTICAL);
-        label.setPadding(dp(6), dp(12), dp(6), dp(5));
+    private UiSemanticPalette semanticColors() {
+        return UiSemanticPalette.of(isDarkMode, accentColor());
+    }
+
+    private TextView settingsText(String value, float size, int color, boolean bold) {
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextSize(size);
+        text.setTextColor(color);
+        text.setTypeface(appTypeface(bold ? Typeface.BOLD : Typeface.NORMAL));
+        text.setIncludeFontPadding(false);
+        return text;
+    }
+
+    private TextView settingsSectionLabel(String value) {
+        TextView label = settingsText(value, 12, semanticColors().secondary, true);
+        label.setPadding(dp(10), dp(12), dp(10), dp(7));
+        androidx.core.view.ViewCompat.setAccessibilityHeading(label, true);
         return label;
     }
 
-    private LinearLayout settingsMenuRow(int iconResId, String titleText, String subtitleText, int tintColor, View.OnClickListener listener) {
+    private LinearLayout settingsRowBase(int iconResId, int iconColor) {
         LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(dp(64));
-        row.setPadding(dp(12), dp(10), dp(12), dp(10));
-        row.setBackground(interactiveGlassSurfaceBackground(glassRowColor(), dp(18)));
-        row.setClickable(true);
+        row.setMinimumHeight(dp(60));
+        row.setPadding(dp(12), dp(13), dp(12), dp(13));
+        row.setBackground(rippleBackground(Color.TRANSPARENT,
+                withAlpha(semanticColors().accent, isDarkMode ? 44 : 24), 0, Color.TRANSPARENT));
         row.setFocusable(true);
-        row.setContentDescription(getString(R.string.main_title_subtitle_desc, titleText, subtitleText));
-        row.setOnClickListener(listener);
-
-        FrameLayout iconSurface = new FrameLayout(this);
-        iconSurface.setBackground(buttonBackground(glassIconTintColor(tintColor), dp(14)));
         ImageView icon = new ImageView(this);
+        icon.setTag("settings:icon");
         icon.setImageResource(iconResId);
-        icon.setImageTintList(ColorStateList.valueOf(tintColor));
-        icon.setScaleType(ImageView.ScaleType.CENTER);
+        icon.setImageTintList(ColorStateList.valueOf(iconColor));
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        iconSurface.addView(icon, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
-        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(40), dp(40));
-        iconParams.setMargins(0, 0, dp(12), 0);
-        row.addView(iconSurface, iconParams);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(20), dp(22));
+        iconParams.rightMargin = dp(12);
+        row.addView(icon, iconParams);
+        return row;
+    }
 
-        LinearLayout texts = new LinearLayout(this);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        texts.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = new TextView(this);
-        title.setText(titleText);
-        title.setTextColor(primaryTextColor());
-        title.setTextSize(15);
-        title.setTypeface(appTypeface(Typeface.BOLD));
-        title.setSingleLine(true);
-        title.setEllipsize(TextUtils.TruncateAt.END);
-        texts.addView(title);
+    private SettingsRowContent settingsRowTexts(String titleText, String valueText, boolean destructive) {
+        UiSemanticPalette colors = semanticColors();
+        TextView title = settingsText(titleText, 15, destructive ? colors.error : colors.text, false);
+        title.setTag("settings:title");
+        TextView value = settingsText(valueText, 13, colors.secondary, false);
+        value.setTag("settings:value");
+        if (valueText == null || valueText.isEmpty()) value.setVisibility(View.GONE);
+        return new SettingsRowContent(this, title, value);
+    }
 
-        TextView subtitle = new TextView(this);
-        subtitle.setText(subtitleText);
-        subtitle.setTextColor(secondaryTextColor());
-        subtitle.setTextSize(12);
-        subtitle.setTypeface(appTypeface(Typeface.NORMAL));
-        subtitle.setSingleLine(true);
-        subtitle.setEllipsize(TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        subtitleParams.setMargins(0, dp(3), 0, 0);
-        texts.addView(subtitle, subtitleParams);
-        row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
+    private LinearLayout settingsMenuRow(int iconResId, String titleText, String valueText,
+                                        int tintColor, View.OnClickListener listener) {
+        LinearLayout row = settingsRowBase(iconResId, tintColor);
+        row.addView(settingsRowTexts(titleText, valueText, tintColor == semanticColors().error),
+                new LinearLayout.LayoutParams(0, -2, 1f));
         ImageView arrow = new ImageView(this);
         arrow.setImageResource(R.drawable.ic_chevron_right);
-        arrow.setImageTintList(ColorStateList.valueOf(secondaryTextColor()));
-        arrow.setAlpha(0.72f);
-        arrow.setScaleType(ImageView.ScaleType.CENTER);
+        arrow.setImageTintList(ColorStateList.valueOf(semanticColors().secondary));
         arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        row.addView(arrow, new LinearLayout.LayoutParams(dp(24), dp(40)));
-
+        LinearLayout.LayoutParams arrowParams = new LinearLayout.LayoutParams(dp(16), dp(20));
+        arrowParams.leftMargin = dp(8);
+        row.addView(arrow, arrowParams);
+        row.setContentDescription(valueText == null || valueText.isEmpty() ? titleText
+                : getString(R.string.main_title_subtitle_desc, titleText, valueText));
+        row.setOnClickListener(listener);
         return row;
     }
 
-    private LinearLayout settingsToggleRow(int iconResId, String titleText, String subtitleText, int tintColor, boolean checked, android.widget.CompoundButton.OnCheckedChangeListener listener) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(dp(64));
-        row.setPadding(dp(12), dp(10), dp(12), dp(10));
-        row.setBackground(interactiveGlassSurfaceBackground(glassRowColor(), dp(18)));
-
-        FrameLayout iconSurface = new FrameLayout(this);
-        iconSurface.setBackground(buttonBackground(glassIconTintColor(tintColor), dp(14)));
-        ImageView icon = new ImageView(this);
-        icon.setImageResource(iconResId);
-        icon.setImageTintList(ColorStateList.valueOf(tintColor));
-        icon.setScaleType(ImageView.ScaleType.CENTER);
-        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        iconSurface.addView(icon, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
-        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(40), dp(40));
-        iconParams.setMargins(0, 0, dp(12), 0);
-        row.addView(iconSurface, iconParams);
-
-        LinearLayout texts = new LinearLayout(this);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        texts.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = new TextView(this);
-        title.setText(titleText);
-        title.setTextColor(primaryTextColor());
-        title.setTextSize(15);
-        title.setTypeface(appTypeface(Typeface.BOLD));
-        title.setSingleLine(true);
-        title.setEllipsize(TextUtils.TruncateAt.END);
-        texts.addView(title);
-        TextView subtitle = new TextView(this);
-        subtitle.setText(subtitleText);
-        subtitle.setTextColor(secondaryTextColor());
-        subtitle.setTextSize(12);
-        subtitle.setTypeface(appTypeface(Typeface.NORMAL));
-        subtitle.setSingleLine(true);
-        subtitle.setEllipsize(TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        subtitleParams.setMargins(0, dp(3), 0, 0);
-        texts.addView(subtitle, subtitleParams);
-        row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
+    private LinearLayout settingsToggleRow(int iconResId, String titleText, String ignoredDescription,
+            int tintColor, boolean checked, android.widget.CompoundButton.OnCheckedChangeListener listener) {
+        LinearLayout row = settingsRowBase(iconResId, tintColor);
+        SettingsRowContent texts = settingsRowTexts(titleText,
+                getString(checked ? R.string.main_state_on : R.string.main_state_off), false);
+        row.addView(texts, new LinearLayout.LayoutParams(0, -2, 1f));
         SwitchCompat toggle = new SwitchCompat(this);
+        int[][] states = {{android.R.attr.state_checked}, {}};
+        toggle.setThumbTintList(new ColorStateList(states,
+                new int[]{semanticColors().accent, isDarkMode ? 0xFFA2AAB8 : Color.WHITE}));
+        toggle.setTrackTintList(new ColorStateList(states,
+                new int[]{withAlpha(semanticColors().accent, isDarkMode ? 115 : 130),
+                        withAlpha(semanticColors().secondary, isDarkMode ? 76 : 64)}));
         toggle.setChecked(checked);
         toggle.setContentDescription(titleText);
-        toggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            row.setContentDescription(getString(R.string.main_toggle_desc, titleText,
-                    getString(isChecked ? R.string.main_state_on : R.string.main_state_off)));
-            if (listener != null) listener.onCheckedChanged(buttonView, isChecked);
-        });
         toggle.setClickable(false);
         toggle.setFocusable(false);
-        row.addView(toggle, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
-
-        // 整行可点击切换，而不只是右侧的小开关
-        row.setClickable(true);
-        row.setFocusable(true);
-        row.setContentDescription(getString(R.string.main_toggle_desc, titleText,
-                getString(checked ? R.string.main_state_on : R.string.main_state_off)));
+        LinearLayout.LayoutParams switchParams = new LinearLayout.LayoutParams(-2, -2);
+        switchParams.leftMargin = dp(8);
+        row.addView(toggle, switchParams);
+        Runnable update = () -> {
+            String state = getString(toggle.isChecked() ? R.string.main_state_on : R.string.main_state_off);
+            ((TextView) texts.findViewWithTag("settings:value")).setText(state);
+            row.setContentDescription(getString(R.string.main_toggle_desc, titleText, state));
+        };
+        toggle.setOnCheckedChangeListener((button, value) -> {
+            update.run();
+            if (listener != null) listener.onCheckedChanged(button, value);
+        });
         row.setOnClickListener(view -> toggle.setChecked(!toggle.isChecked()));
-
+        update.run();
         return row;
-    }
-
-    private LinearLayout.LayoutParams settingsRowParams() {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        params.setMargins(0, 0, 0, dp(6));
-        return params;
     }
 
     private int dangerColor() {
-        return isDarkMode ? Color.rgb(244, 128, 112) : Color.rgb(177, 67, 55);
+        return semanticColors().error;
     }
 
     private int dangerContainerColor() {
-        return isDarkMode ? Color.rgb(60, 20, 20) : Color.rgb(254, 242, 242);
+        return semanticColors().errorContainer;
     }
 
     private int softTintColor(int color) {
@@ -3716,31 +4168,31 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int glassPanelTopColor() {
-        return isDarkMode ? Color.argb(228, 31, 36, 47) : Color.argb(226, 255, 255, 255);
+        return isDarkMode ? Color.argb(242, 29, 33, 41) : Color.argb(226, 255, 255, 255);
     }
 
     private int glassPanelBottomColor() {
-        return isDarkMode ? Color.argb(216, 21, 26, 35) : Color.argb(206, 245, 250, 255);
+        return isDarkMode ? Color.argb(246, 22, 25, 32) : Color.argb(206, 245, 250, 255);
     }
 
     private int glassRowColor() {
-        return isDarkMode ? Color.argb(56, 255, 255, 255) : Color.argb(126, 255, 255, 255);
+        return isDarkMode ? Color.argb(18, 255, 255, 255) : Color.argb(126, 255, 255, 255);
     }
 
     private int glassControlColor() {
-        return isDarkMode ? Color.argb(68, 255, 255, 255) : Color.argb(146, 255, 255, 255);
+        return isDarkMode ? Color.argb(26, 255, 255, 255) : Color.argb(146, 255, 255, 255);
     }
 
     private int glassBorderColor() {
-        return isDarkMode ? Color.argb(72, 255, 255, 255) : Color.argb(164, 255, 255, 255);
+        return isDarkMode ? Color.argb(28, 255, 255, 255) : Color.argb(164, 255, 255, 255);
     }
 
     private int glassOuterEdgeColor() {
-        return isDarkMode ? Color.argb(98, 255, 255, 255) : Color.argb(190, 255, 255, 255);
+        return isDarkMode ? Color.argb(38, 255, 255, 255) : Color.argb(190, 255, 255, 255);
     }
 
     private int glassIconTintColor(int color) {
-        return Color.argb(isDarkMode ? 72 : 50, Color.red(color), Color.green(color), Color.blue(color));
+        return Color.argb(isDarkMode ? 42 : 50, Color.red(color), Color.green(color), Color.blue(color));
     }
 
     private int withAlpha(int color, int alpha) {
@@ -3756,6 +4208,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void styleDialogWindow(AlertDialog dialog) {
+        if (isDarkMode && dialog.getWindow() != null) {
+            DialogSurfaceStyle.apply(dialog,
+                    roundedSurface(DarkUiPalette.DIALOG_SURFACE, dp(24), borderColor()));
+        }
         AppFonts.install(dialog);
         Button positive = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         if (positive != null) {
@@ -3766,6 +4222,11 @@ public class MainActivity extends AppCompatActivity {
         if (negative != null) {
             negative.setTextColor(positive == null ? accentColor() : secondaryTextColor());
             negative.setTypeface(appTypeface(Typeface.BOLD));
+        }
+        Button neutral = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+        if (neutral != null) {
+            neutral.setTextColor(secondaryTextColor());
+            neutral.setTypeface(appTypeface(Typeface.BOLD));
         }
     }
 
@@ -3837,6 +4298,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showPeriodSettingsDialog() {
+        ModalCoordinator.Token token = acquireModal("period_settings");
+        if (token == null) return;
+        final ImportFlowState periodImport = importFlow != null
+                && importFlow.stage() == ImportFlowState.Stage.PERIODS ? importFlow : null;
         periodCount();
         Bundle restored = pendingSettingsRestore;
         pendingSettingsRestore = null;
@@ -3908,15 +4373,20 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 if (savePeriodTimes(draft)) {
+                    if (periodImport != null) {
+                        periodImport.periodsSaved();
+                        // Do not resurrect a successfully saved period draft during a close/recreate gap.
+                        settingsDraftCapture = null;
+                        pendingSettingsRestore = null;
+                        modalCoordinator.switchAfterDismiss(token, this::resumeImportFlow);
+                    }
                     render();
                     scheduleClassReminderNotifications();
                     dialog.dismiss();
                 }
             });
         });
-        dialog.show();
-        styleDialogWindow(dialog);
-        trackSettingsDraft(dialog, () -> {
+        Runnable draftCleanup = beginSettingsDraft(() -> {
             Bundle state = new Bundle();
             state.putString("kind", "periods");
             state.putStringArrayList("rules", new ArrayList<>(draft));
@@ -3924,6 +4394,18 @@ public class MainActivity extends AppCompatActivity {
             else if (pendingPeriodRuleRestore != null) state.putBundle("rule_editor", pendingPeriodRuleRestore);
             return state;
         });
+        // The per-period editor is a dependent child of this window, like an editor's discard prompt.
+        try {
+            showOwnedDialog(token, dialog, true, () -> {
+                draftCleanup.run();
+                if (activePeriodRuleDialog != null) activePeriodRuleDialog.dismiss();
+                // Cancel/back means cancel this import, never loop the shortage prompt.
+                if (periodImport != null) cancelImportWindow(periodImport, ImportFlowState.Stage.PERIODS);
+            }, null);
+        } catch (RuntimeException failure) {
+            draftCleanup.run();
+            throw failure;
+        }
         if (pendingPeriodRuleRestore != null) {
             int index = pendingPeriodRuleRestore.getInt("index", -1);
             if (index >= -1 && index < draft.size()) showPeriodRuleDialog(draft, index, refresh[0]);
@@ -3949,20 +4431,8 @@ public class MainActivity extends AppCompatActivity {
         intent.removeExtra(EXTRA_SHOW_REMINDER_POPUP);
         long startAt = intent.getLongExtra(ClassReminderReceiver.EXTRA_START_AT, -1L);
         long endAt = intent.getLongExtra(ClassReminderReceiver.EXTRA_END_AT, -1L);
-        Runnable popup = () -> showClassReminderPopup(name, time, room, minutes, event, startAt, endAt);
-        uiHandler.postDelayed(
-                () -> {
-                    if (isFinishing() || isDestroyed()) {
-                        return;
-                    }
-                    if (activityResumed) {
-                        popup.run();
-                    } else {
-                        pendingReminderPopup = popup;
-                    }
-                },
-                350L
-        );
+        // Queue immediately after authentication, before any delayed lifecycle work can run.
+        showClassReminderPopup(name, time, room, minutes, event, startAt, endAt);
     }
 
     private void maybeSendDebugReminderTestNotification(Intent intent) {
@@ -3983,6 +4453,31 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showClassReminderPopup(String name, String time, String room, int minutes, boolean event, long startAt, long endAt) {
+        if (destroyingActivity || isFinishing() || isDestroyed()) return;
+        Bundle reminder = new Bundle();
+        reminder.putString("name", name);
+        reminder.putString("time", time);
+        reminder.putString("room", room);
+        reminder.putInt("minutes", minutes);
+        reminder.putBoolean("event", event);
+        reminder.putLong("start_at", startAt);
+        reminder.putLong("end_at", endAt);
+        pendingReminderPopups.add(reminder);
+        uiHandler.post(this::drainDeferredModals);
+    }
+
+    private void showNextReminderPopup() {
+        if (pendingReminderPopups.isEmpty() || activeReminderPopup != null) return;
+        ModalCoordinator.Token token = acquireModal("reminder_popup");
+        if (token == null) return;
+        Bundle reminder = pendingReminderPopups.remove(0);
+        activeReminderPopup = reminder;
+        String name = reminder.getString("name");
+        String time = reminder.getString("time");
+        String room = reminder.getString("room");
+        boolean event = reminder.getBoolean("event");
+        long startAt = reminder.getLong("start_at", -1L);
+        long endAt = reminder.getLong("end_at", -1L);
         String courseName = TextUtils.isEmpty(name) ? (event ? getString(R.string.main_event) : getString(R.string.main_next_class)) : name.trim();
         StringBuilder message = new StringBuilder(ReminderTiming.statusText(event, startAt, endAt, System.currentTimeMillis()));
         if (!TextUtils.isEmpty(time)) {
@@ -3991,11 +4486,14 @@ public class MainActivity extends AppCompatActivity {
         if (!TextUtils.isEmpty(room)) {
             message.append("\n").append(getString(R.string.main_popup_location, room.trim()));
         }
-        AppFonts.install(new MaterialAlertDialogBuilder(this)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(courseName)
                 .setMessage(message.toString())
                 .setPositiveButton(getString(R.string.main_got_it), null)
-                .show());
+                .create();
+        showOwnedDialog(token, dialog, true, () -> {
+            if (activeReminderPopup == reminder) activeReminderPopup = null;
+        }, null);
     }
 
     private void renderPeriodRuleList(LinearLayout list, List<String> draft, Runnable refresh) {
@@ -4010,6 +4508,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showPeriodRuleDialog(List<String> draft, int index, Runnable refresh) {
+        // One dependent rule editor at a time above the period list.
+        if (activePeriodRuleDialog != null && activePeriodRuleDialog.isShowing()) return;
         boolean editing = index >= 0;
         Bundle restored = pendingPeriodRuleRestore;
         pendingPeriodRuleRestore = null;
@@ -4078,11 +4578,15 @@ public class MainActivity extends AppCompatActivity {
             return state;
         };
         periodRuleDraftCapture = capture;
+        activePeriodRuleDialog = dialog;
         dialog.setOnDismissListener(ignored -> {
             if (periodRuleDraftCapture == capture) periodRuleDraftCapture = null;
+            if (activePeriodRuleDialog == dialog) activePeriodRuleDialog = null;
         });
         dialog.show();
         styleDialogWindow(dialog);
+        Button deleteBtn = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+        if (deleteBtn != null) deleteBtn.setTextColor(dangerColor());
     }
 
     private String periodRangeFromInputs(EditText startInput, EditText endInput) {
@@ -4172,27 +4676,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadPeriodTimes() {
         periodTimes.clear();
-        String encoded = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PERIOD_TIMES_KEY, null);
-        if (encoded != null) {
-            try {
-                JSONArray array = new JSONArray(encoded);
-                List<String> loaded = new ArrayList<>();
-                for (int i = 0; i < array.length() && loaded.size() < MAX_PERIODS; i++) {
-                    String value = array.optString(i, "").trim();
-                    if (!value.isEmpty()) {
-                        loaded.add(value);
-                    }
-                }
-                if (validatePeriodRules(loaded) == null) {
-                    periodTimes.addAll(loaded);
-                }
-            } catch (Exception ignored) {
-                periodTimes.clear();
-            }
-        }
-        if (periodTimes.isEmpty()) {
-            periodTimes.addAll(Arrays.asList(DEFAULT_PERIOD_TIMES));
-        }
+        periodTimes.addAll(StoredTimetableSnapshot.readPeriodTimes(getSharedPreferences(PREFS_NAME, MODE_PRIVATE)));
     }
 
     private boolean savePeriodTimes(List<String> rules) {
@@ -4250,6 +4734,27 @@ public class MainActivity extends AppCompatActivity {
         }
         showClassReminderPopup(course.name, periodRangeTime(course), course.room, minutes, false);
         Toast.makeText(this, getString(R.string.main_test_sent), Toast.LENGTH_SHORT).show();
+    }
+
+    private void showReminderStatusDialog() {
+        if (isFinishing() || isDestroyed()) return;
+        ModalCoordinator.Token token = modalCoordinator.tryAcquire("reminder_status");
+        if (token == null) return;
+        final android.app.Dialog[] holder = new android.app.Dialog[1];
+        try {
+            android.app.Dialog dialog = ReminderStatusDialog.create(this, () -> {
+                modalCoordinator.dismissed(token);
+                if (reminderStatusDialog == holder[0]) reminderStatusDialog = null;
+            });
+            holder[0] = dialog;
+            reminderStatusDialog = dialog;
+            dialog.show();
+            modalCoordinator.opened(token);
+        } catch (RuntimeException failure) {
+            reminderStatusDialog = null;
+            modalCoordinator.dismissed(token);
+            throw failure;
+        }
     }
 
     private String notificationStatusText() {
@@ -4318,18 +4823,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showRemindersDisabledDialog(Runnable afterEnable) {
-        AppFonts.install(new MaterialAlertDialogBuilder(this)
+        ModalCoordinator.Token token = acquireModal("reminders_off");
+        if (token == null) return;
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(getString(R.string.main_reminders_off_title))
                 .setMessage(getString(R.string.main_reminders_off_message))
-                .setPositiveButton(getString(R.string.main_turn_on_reminders), (dialog, which) -> {
+                .setPositiveButton(getString(R.string.main_turn_on_reminders), (d, which) -> {
                     applyNotificationToggle(true);
                     Toast.makeText(this, getString(R.string.main_reminders_on_toast), Toast.LENGTH_SHORT).show();
-                    if (afterEnable != null) {
-                        afterEnable.run();
-                    }
+                    // A follow-up (test reminder popup) may open a window: run it after this one closes.
+                    if (afterEnable != null) modalCoordinator.switchAfterDismiss(token, afterEnable);
                 })
                 .setNegativeButton(getString(R.string.main_not_now), null)
-                .show());
+                .create();
+        showOwnedDialog(token, dialog, true, null, null);
     }
 
     private boolean openExactAlarmSettings() {
@@ -4390,12 +4897,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void confirmDeleteCurrentConfiguration() {
-        AppFonts.install(new MaterialAlertDialogBuilder(this)
+        ModalCoordinator.Token token = acquireModal("delete_config");
+        if (token == null) return;
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(getString(R.string.main_delete_config))
                 .setMessage(getString(R.string.main_delete_config_message))
                 .setNegativeButton(getString(R.string.action_cancel), null)
-                .setPositiveButton(getString(R.string.action_delete), (dialog, which) -> deleteCurrentConfiguration())
-                .show());
+                .setPositiveButton(getString(R.string.action_delete), (d, which) -> deleteCurrentConfiguration())
+                .create();
+        showOwnedDialog(token, dialog, true, null, null);
+        Button deletePositive = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        if (deletePositive != null) deletePositive.setTextColor(dangerColor());
     }
 
     private void deleteCurrentConfiguration() {
@@ -4407,6 +4919,7 @@ public class MainActivity extends AppCompatActivity {
                 .remove(PERIOD_TIMES_KEY)
                 .remove(CALENDAR_START_KEY)
                 .remove(CALENDAR_END_KEY)
+                .remove(AcademicCalendarStore.TIME_ZONE_KEY)
                 .remove(CALENDAR_WEEKS_KEY)
                 .remove(CALENDAR_NAME_KEY)
                 .remove(CALENDAR_INITIALIZED_KEY)
@@ -4420,7 +4933,8 @@ public class MainActivity extends AppCompatActivity {
         if (alarmManager != null) {
             cancelScheduledClassReminders(alarmManager, legacyReminderCodes);
         }
-        ReminderScheduler.clear(this);
+        // Timetable deletion must preserve independent events, including an unreadable event store.
+        ReminderScheduler.replaceSchedule(this, java.util.Collections.emptyList(), true, false);
         courses.clear();
         storageLocked = false;
         loadPeriodTimes();
@@ -4435,20 +4949,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showImportChooser() {
+        if (!mayOpenModal()) return;
         if (storageLocked) {
             Toast.makeText(this, getString(R.string.main_locked_cannot_import), Toast.LENGTH_LONG).show();
             return;
         }
-        new PastelCourseSheet(this, isDarkMode, pastelAccent()).showImportChooser(this::openPdfPicker, this::showPasteImport);
+        newModalSheet().showImportChooser(this::openPdfPicker, this::showPasteImport);
     }
 
     /** Plain-text import for timetables whose PDF layout the parser cannot read. */
     private void showPasteImport() {
+        if (!mayOpenModal()) return;
         if (storageLocked) {
             Toast.makeText(this, getString(R.string.main_locked_cannot_import), Toast.LENGTH_LONG).show();
             return;
         }
-        new PastelCourseSheet(this, isDarkMode, pastelAccent()).showPasteImport(
+        PastelCourseSheet sheet = newModalSheet();
+        activePasteImport = sheet;
+        Bundle restored = pendingPasteRestore;
+        pendingPasteRestore = null;
+        sheet.showPasteImport(
                 TextTimetableParser.FORMAT_HINT, TextTimetableParser.EXAMPLE, text -> {
                     TextTimetableParser.Result result = TextTimetableParser.parse(text, MAX_PERIODS, MAX_COURSES);
                     if (result.courses.isEmpty()) {
@@ -4459,9 +4979,12 @@ public class MainActivity extends AppCompatActivity {
                         return getResources().getQuantityString(R.plurals.main_paste_lines_need_fix,
                                 result.errors.size(), result.errors.size(), joinImportErrors(result.errors));
                     }
-                    parsedAndShowCourses(result.courses, getString(R.string.main_pasted_text_source));
+                    cancelPdfImport(); // a prior PDF worker must not replace this accepted text
+                    importFlow = new ImportFlowState(result.courses, getString(R.string.main_pasted_text_source), null);
                     return null;
-                });
+                }, restored, () -> {
+                    if (activePasteImport == sheet) activePasteImport = null;
+                }, this::resumeImportFlow);
     }
 
     private String joinImportErrors(List<String> errors) {
@@ -4481,8 +5004,12 @@ public class MainActivity extends AppCompatActivity {
         }
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("application/pdf");
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/pdf",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "text/csv", "text/tab-separated-values", "text/plain", "application/csv",
+                "text/comma-separated-values", "application/vnd.ms-excel"});
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(intent, REQUEST_IMPORT_PDF);
     }
 
@@ -4491,6 +5018,10 @@ public class MainActivity extends AppCompatActivity {
                 .getBoolean(CALENDAR_INITIALIZED_KEY, containsLegacyCalendar());
         if (!initialized) {
             showCalendarImportDialog(true);
+        } else if (importFlow != null && importFlow.stage() == ImportFlowState.Stage.CALENDAR) {
+            importFlow.finish();
+            importFlow = null;
+            uiHandler.post(this::drainDeferredModals);
         }
     }
 
@@ -4500,103 +5031,60 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showCalendarImportDialog(boolean firstRun) {
-        LinearLayout form = new LinearLayout(this);
-        form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(4), dp(8), dp(4), 0);
-
-        EditText startInput = calendarDateInput(firstRun ? "" : formatDate(calendarStartMillis()),
-                calendarStartMillis());
-        EditText endInput = calendarDateInput(firstRun ? "" : formatDate(calendarEndMillis()),
-                calendarEndMillis());
-        form.addView(label(getString(R.string.main_label_term_start)));
-        form.addView(startInput, fieldParams());
-        form.addView(label(getString(R.string.main_label_term_end)));
-        form.addView(endInput, fieldParams());
-
-        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
-                .setTitle(firstRun ? getString(R.string.main_welcome_calendar_title) : getString(R.string.main_calendar_settings))
-                .setMessage(firstRun
-                        ? getString(R.string.main_welcome_calendar_message)
-                        : getString(R.string.main_calendar_message))
-                .setView(form)
-                .setPositiveButton(getString(R.string.action_save), null);
-        if (!firstRun) {
-            builder.setNegativeButton(getString(R.string.action_cancel), null);
+        if (calendarDraft == null) {
+            if (!firstRun && !mayOpenModal()) return;
+            calendarDraft = new CalendarSetupDialog.State(firstRun,
+                    firstRun ? "" : formatDate(calendarStartMillis()),
+                    firstRun ? "" : formatDate(calendarEndMillis()));
         }
-        AlertDialog dialog = builder.create();
-        dialog.setCancelable(!firstRun);
-        dialog.setOnShowListener(d -> {
-            Button confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-            confirm.setOnClickListener(view -> {
-                Long start = parseDateMillis(startInput.getText().toString());
-                Long end = parseDateMillis(endInput.getText().toString());
-                if (start == null || end == null) {
-                    Toast.makeText(this, getString(R.string.main_date_format), Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                if (end < start) {
-                    Toast.makeText(this, getString(R.string.main_end_before_start), Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                saveAcademicCalendar(getString(R.string.main_calendar_manual_name), start, end);
-                dialog.dismiss();
-            });
-        });
-        dialog.show();
-        styleDialogWindow(dialog);
+        ModalCoordinator.Token token = acquireModal(firstRun ? "calendar_setup" : "calendar_settings");
+        if (token == null) return; // draft stays queued, including first-run setup
+        final CalendarSetupDialog.State draft = calendarDraft;
+        CalendarSetupDialog editor = new CalendarSetupDialog(this, draft,
+                input(getString(R.string.sheet_pick_date), draft.start),
+                input(getString(R.string.sheet_pick_date), draft.end),
+                label(getString(R.string.main_label_term_start)), label(getString(R.string.main_label_term_end)),
+                calendarStartMillis(), calendarEndMillis(), (start, end) -> {
+                    if (!saveAcademicCalendar(getString(R.string.main_calendar_manual_name), start, end)) return false;
+                    if (importFlow != null && importFlow.stage() == ImportFlowState.Stage.CALENDAR) {
+                        importFlow.finish();
+                        importFlow = null;
+                    }
+                    return true;
+                });
+        calendarEditor = editor;
+        showOwnedDialog(token, editor.dialog, true, () -> {
+            editor.closeChild();
+            if (calendarEditor == editor) calendarEditor = null;
+            if (!destroyingActivity && calendarDraft == draft) calendarDraft = null;
+        }, null);
     }
 
-    /** Read-only date field: choosing a date uses the same system calendar as the event editor. */
-    private EditText calendarDateInput(String selectedDate, long fallbackMillis) {
-        EditText field = input(getString(R.string.sheet_pick_date), selectedDate);
-        field.setKeyListener(null);
-        field.setFocusable(false);
-        field.setCursorVisible(false);
-        field.setOnClickListener(v -> {
-            Long selected = parseDateMillis(field.getText().toString());
-            Calendar initial = Calendar.getInstance();
-            initial.setTimeInMillis(selected != null ? selected : fallbackMillis);
-            Calendar min = Calendar.getInstance();
-            min.clear();
-            min.set(2000, Calendar.JANUARY, 1);
-            Calendar max = Calendar.getInstance();
-            max.clear();
-            max.set(2100, Calendar.DECEMBER, 31);
-            initial.setTimeInMillis(Math.max(min.getTimeInMillis(),
-                    Math.min(max.getTimeInMillis(), initial.getTimeInMillis())));
-            android.app.DatePickerDialog picker = new android.app.DatePickerDialog(this,
-                    (view, year, month, day) -> {
-                        Calendar chosen = Calendar.getInstance();
-                        chosen.clear();
-                        chosen.set(year, month, day);
-                        field.setText(formatDate(chosen.getTimeInMillis()));
-                    }, initial.get(Calendar.YEAR), initial.get(Calendar.MONTH), initial.get(Calendar.DAY_OF_MONTH));
-            picker.getDatePicker().setMinDate(min.getTimeInMillis());
-            picker.getDatePicker().setMaxDate(max.getTimeInMillis());
-            picker.show();
-            AppFonts.install(picker);
-        });
-        return field;
-    }
-
-    private void saveAcademicCalendar(String name, long startMillis, long endMillis) {
+    private boolean saveAcademicCalendar(String name, long startMillis, long endMillis) {
+        if (endMillis < startMillis) {
+            Toast.makeText(this, getString(R.string.main_end_before_start), Toast.LENGTH_LONG).show();
+            return false;
+        }
         int totalWeeks = Math.max(1, AgendaDates.week(startMillis, endMillis));
+        if (totalWeeks > TimetableRules.MAX_WEEK) {
+            Toast.makeText(this, getString(R.string.main_calendar_too_long, TimetableRules.MAX_WEEK), Toast.LENGTH_LONG).show();
+            return false;
+        }
         boolean committed = SafePreferences.commit(getSharedPreferences(PREFS_NAME, MODE_PRIVATE),
-                new PreferenceTransaction()
-                        .put(CALENDAR_START_KEY, startMillis)
-                        .put(CALENDAR_END_KEY, endMillis)
+                AcademicCalendarStore.putDates(new PreferenceTransaction(), startMillis, endMillis)
                         .put(CALENDAR_WEEKS_KEY, totalWeeks)
                         .put(CALENDAR_NAME_KEY, name)
                         .put(CALENDAR_INITIALIZED_KEY, true));
         if (!committed) {
             Toast.makeText(this, getString(R.string.main_calendar_save_failed), Toast.LENGTH_LONG).show();
-            return;
+            return false;
         }
         viewingWeek = 0;
         pastelBrowseDate = 0;
         render();
         scheduleClassReminderNotifications();
         Toast.makeText(this, getResources().getQuantityString(R.plurals.main_calendar_saved, totalWeeks, totalWeeks), Toast.LENGTH_LONG).show();
+        return true;
     }
 
     private void importPdf(Uri uri) {
@@ -4609,19 +5097,21 @@ public class MainActivity extends AppCompatActivity {
         // last period disappear silently before the user can review the import.
         final int maxPeriods = MAX_PERIODS;
         cancelPdfImport();
+        importFlow = null;
         pendingImportUri = uri;
         final long token = pdfImportDelivery.begin();
         Thread worker = new Thread(() -> {
             Runnable outcome;
             try {
-                byte[] pdfBytes = readUriBytes(uri, MAX_PDF_BYTES);
-                PdfCourseParser.ParseResult result = PdfCourseParser.parseCourses(
-                        pdfBytes, maxPeriods, MAX_STREAM_BYTES, MAX_COURSES);
+                byte[] fileBytes = readUriBytes(uri, MAX_PDF_BYTES);
+                String filename = importFilename(uri);
+                TimetableFileParser.Result result = TimetableFileParser.parse(
+                        fileBytes, filename, maxPeriods, MAX_STREAM_BYTES, MAX_COURSES);
                 if (BuildConfig.DEBUG) {
                     // The parse log contains course names, rooms and teachers; never log it in release.
                     android.util.Log.d("PDFImport", result.debugLog);
                 }
-                outcome = () -> parsedAndShowCourses(result.courses);
+                outcome = () -> parsedAndShowCourses(result.courses, result.source, uri);
             } catch (ImportException error) {
                 outcome = () -> Toast.makeText(this, getString(R.string.main_import_error, error.getMessage()), Toast.LENGTH_LONG).show();
             } catch (SecurityException error) {
@@ -4639,6 +5129,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Runs on the UI thread; shows the latest import result only while the activity is resumed. */
     private void deliverPendingPdfResult() {
+        if (restoringInteractions) return;
         Runnable result = pdfImportDelivery.take();
         if (result == null || isFinishing() || isDestroyed()) {
             return;
@@ -4658,48 +5149,96 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    private void parsedAndShowCourses(List<PdfCourseParser.ParsedCourse> parsedItems) {
-        parsedAndShowCourses(parsedItems, "PDF");
+
+    private void parsedAndShowCourses(List<PdfCourseParser.ParsedCourse> parsedItems, String sourceLabel, Uri sourceUri) {
+        if (isFinishing() || isDestroyed()) return;
+        importFlow = new ImportFlowState(parsedItems, sourceLabel, sourceUri == null ? null : sourceUri.toString());
+        // Even the first result must pass the same overlay/lifecycle gate as restored results.
+        resumeImportFlow();
     }
 
-    private void parsedAndShowCourses(List<PdfCourseParser.ParsedCourse> parsedItems, String sourceLabel) {
-        int requiredPeriods = 0;
-        for (PdfCourseParser.ParsedCourse item : parsedItems) {
-            requiredPeriods = Math.max(requiredPeriods, item.endPeriod);
-        }
+    private void showImportReview(ImportFlowState flow) {
+        if (flow != importFlow || !flow.canSubmit()) return;
+        ModalCoordinator.Token token = acquireModal("import_review");
+        if (token == null) return;
+        List<PdfCourseParser.ParsedCourse> parsedItems = flow.items();
+        int requiredPeriods = ImportPlanner.requiredPeriods(parsedItems);
         if (requiredPeriods > periodCount()) {
-            AppFonts.install(new MaterialAlertDialogBuilder(this)
+            AlertDialog shortage = new MaterialAlertDialogBuilder(this)
                     .setTitle(getString(R.string.main_need_more_periods_title))
                     .setMessage(getString(R.string.main_need_more_periods_message,
-                            sourceLabel, parsedItems.size(), requiredPeriods, periodCount()))
-                    .setPositiveButton(getString(R.string.main_set_periods), (dialog, which) -> showPeriodSettingsDialog())
-                    .setNegativeButton(getString(R.string.action_cancel), null)
-                    .show());
+                            flow.sourceLabel, parsedItems.size(), requiredPeriods, periodCount()))
+                    .setPositiveButton(getString(R.string.main_set_periods), (d, which) -> {
+                        flow.configurePeriods();
+                        modalCoordinator.switchAfterDismiss(token, this::resumeImportFlow);
+                    })
+                    .setNegativeButton(getString(R.string.action_cancel), null).create();
+            showOwnedDialog(token, shortage, true,
+                    () -> cancelImportWindow(flow, ImportFlowState.Stage.REVIEW), null);
             return;
         }
         List<Course> parsedCourses = new ArrayList<>();
         for (PdfCourseParser.ParsedCourse item : parsedItems) {
             Course course = new Course();
-            course.day = item.day;
-            course.period = item.period;
-            course.endPeriod = item.endPeriod;
-            course.name = item.name;
-            course.weeks = item.weeks;
-            course.room = item.room;
-            course.teacher = item.teacher;
+            course.day = item.day; course.period = item.period; course.endPeriod = item.endPeriod;
+            course.name = item.name; course.weeks = item.weeks; course.room = item.room; course.teacher = item.teacher;
             Integer sharedColor = CourseColorRules.findColor(courses, course.name);
             if (sharedColor == null) sharedColor = CourseColorRules.findColor(parsedCourses, course.name);
             course.color = sharedColor != null ? sharedColor : previewCourseColorForDay(parsedCourses, course.day);
             parsedCourses.add(course);
         }
-
         if (parsedCourses.isEmpty()) {
-            Toast.makeText(this, getString(R.string.main_no_courses_found, sourceLabel), Toast.LENGTH_LONG).show();
+            cancelImportWindow(flow, ImportFlowState.Stage.REVIEW);
+            modalCoordinator.dismissed(token);
+            Toast.makeText(this, getString(R.string.main_no_courses_found, flow.sourceLabel), Toast.LENGTH_LONG).show();
             return;
         }
+        AlertDialog review = new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.main_import_result_title)).setMessage(importPreviewText(parsedCourses))
+                .setPositiveButton(getString(R.string.main_confirm_import), null)
+                .setNegativeButton(getString(R.string.action_cancel), null).create();
+        review.setOnShowListener(shown -> review.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            if (flow != importFlow || !flow.canSubmit()) return; // also rejects duplicate clicks after commit
+            List<Course> candidate = copyCourses();
+            List<Course> attempt = new ArrayList<>();
+            for (Course parsed : parsedCourses) attempt.add(parsed.copy());
+            long baseId = System.currentTimeMillis();
+            ImportPlanner.Result result = ImportPlanner.merge(candidate, attempt, MAX_COURSES, MAX_FIELD_LENGTH,
+                    (parsed, staged, sequence) -> {
+                        parsed.id = baseId + sequence;
+                        Integer sharedColor = CourseColorRules.findColor(staged, parsed.name);
+                        parsed.color = sharedColor != null ? sharedColor : chooseCourseColorForDay(staged, parsed.day, parsed.id);
+                    });
+            if (result.changed() && !saveCourses(candidate)) return; // retain review and immutable parsed draft
+            flow.committed(result); // durable write succeeded: clear submit payload BEFORE render/dismiss/recreation
+            if (result.changed() && displayMode.showsCourses()) {
+                selectedDay = parsedCourses.get(0).day; viewingWeek = 0; pastelBrowseDate = 0; render();
+            }
+            modalCoordinator.switchAfterDismiss(token, this::resumeImportFlow);
+            review.dismiss();
+        }));
+        showOwnedDialog(token, review, true, () -> cancelImportWindow(flow, ImportFlowState.Stage.REVIEW), null);
+    }
 
-        // 显示解析结果预览 + 调试信息
+    private String importPreviewText(List<Course> parsedCourses) {
         StringBuilder preview = new StringBuilder();
+        List<ImportPlanner.Conflict<Course>> conflicts = ImportPlanner.conflicts(
+                copyCourses(), parsedCourses, MAX_COURSES, MAX_FIELD_LENGTH);
+        if (!conflicts.isEmpty()) {
+            preview.append(getResources().getQuantityString(R.plurals.import_overlap_count,
+                    conflicts.size(), conflicts.size())).append('\n');
+            preview.append(getString(R.string.import_overlap_explanation)).append('\n');
+            for (int i = 0; i < Math.min(12, conflicts.size()); i++) {
+                ImportPlanner.Conflict<Course> conflict = conflicts.get(i);
+                preview.append(getString(R.string.import_overlap_pair, conflict.incoming.name,
+                        conflict.existing.name, dayNames[conflict.incoming.day],
+                        Math.max(conflict.incoming.period, conflict.existing.period),
+                        Math.min(conflict.incoming.endPeriod, conflict.existing.endPeriod))).append('\n');
+            }
+            if (conflicts.size() > 12) preview.append(getResources().getQuantityString(
+                    R.plurals.import_overlap_more, conflicts.size() - 12, conflicts.size() - 12)).append('\n');
+            preview.append('\n');
+        }
         preview.append(getString(R.string.main_preview_stats)).append('\n');
         preview.append(getString(R.string.main_preview_parsed, parsedCourses.size())).append("\n\n");
 
@@ -4731,86 +5270,50 @@ public class MainActivity extends AppCompatActivity {
         preview.append("\n\n");
 
         preview.append(getString(R.string.main_preview_courses)).append('\n');
-        for (int i = 0; i < Math.min(5, parsedCourses.size()); i++) {
+        for (int i = 0; i < parsedCourses.size(); i++) {
             Course c = parsedCourses.get(i);
             preview.append(getString(R.string.main_preview_item,
                 i+1, c.name, dayNames[c.day], c.period, c.endPeriod, c.weeks));
         }
-        if (parsedCourses.size() > 5) {
-            preview.append(getString(R.string.main_preview_more, parsedCourses.size() - 5));
+        return preview.toString();
+    }
+
+    /** RESULT contains counts only, never the payload that could submit courses a second time. */
+    private void showImportResult(ImportFlowState flow) {
+        ModalCoordinator.Token token = acquireModal("import_result");
+        if (token == null) return;
+        ImportPlanner.Result result = flow.result();
+        StringBuilder skipLog = new StringBuilder();
+        for (ImportPlanner.Skip skip : result.skipped) {
+            skipLog.append(getString(skip.reason == ImportPlanner.SkipReason.LIMIT
+                    ? R.string.main_skip_limit : R.string.main_skip_exists, skip.name)).append('\n');
         }
+        String summary = getString(R.string.main_import_result_imported, result.imported)
+                + (result.updated > 0 ? getString(R.string.main_import_result_updated, result.updated) : "")
+                + getString(R.string.main_import_result_skipped, result.skipped.size());
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this).setTitle(summary)
+                .setMessage(skipLog.length() > 0 ? getString(R.string.main_skip_reasons, skipLog.toString()) : null)
+                .setPositiveButton(getString(R.string.action_ok), null).create();
+        showOwnedDialog(token, dialog, true, () -> {
+            if (destroyingActivity || importFlow != flow) return;
+            boolean initialized = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getBoolean(CALENDAR_INITIALIZED_KEY, containsLegacyCalendar());
+            flow.resultClosed(initialized);
+            if (flow.stage() == ImportFlowState.Stage.DONE) importFlow = null;
+        }, this::resumeImportFlow);
+    }
 
-        AppFonts.install(new MaterialAlertDialogBuilder(this)
-            .setTitle(getString(R.string.main_import_result_title))
-            .setMessage(preview.toString())
-            .setPositiveButton(getString(R.string.main_confirm_import), (dialog, which) -> {
-                int imported = 0;
-                int updated = 0;
-                int skipped = 0;
-                long baseId = System.currentTimeMillis();
-                StringBuilder skipLog = new StringBuilder();
-                List<Course> candidate = copyCourses();
-
-                for (Course parsed : parsedCourses) {
-                    if (candidate.size() >= MAX_COURSES) {
-                        skipped++;
-                        skipLog.append(getString(R.string.main_skip_limit, parsed.name)).append('\n');
-                        continue;
-                    }
-                    // 同名、同星期、同节次、同周次视为同一门课：
-                    // 老师永久换教室等变化时原地更新已有记录，
-                    // 避免同一时段产生两条重复课程，把后续手动编辑卡死在冲突检查上。
-                    Course existing = findImportedCourseMatch(candidate, parsed);
-                    if (existing != null) {
-                        if (sameCourseText(existing.room, parsed.room)
-                                && sameCourseText(existing.teacher, parsed.teacher)) {
-                            skipped++;
-                            skipLog.append(getString(R.string.main_skip_exists, parsed.name)).append('\n');
-                        } else {
-                            existing.room = parsed.room;
-                            existing.teacher = parsed.teacher;
-                            updated++;
-                        }
-                        continue;
-                    }
-                    parsed.id = baseId + imported + updated + skipped;
-                    Integer sharedColor = CourseColorRules.findColor(candidate, parsed.name);
-                    parsed.color = sharedColor != null ? sharedColor
-                            : chooseCourseColorForDay(candidate, parsed.day, parsed.id);
-                    candidate.add(parsed);
-                    imported++;
-                }
-
-                final boolean importedChanges = imported > 0 || updated > 0;
-                if (importedChanges) {
-                    if (!saveCourses(candidate)) {
-                        return;
-                    }
-                    selectedDay = parsedCourses.get(0).day;
-                    viewingWeek = 0;
-                    pastelBrowseDate = 0;
-                    render();
-                }
-
-                String result = getString(R.string.main_import_result_imported, imported)
-                        + (updated > 0 ? getString(R.string.main_import_result_updated, updated) : "")
-                        + getString(R.string.main_import_result_skipped, skipped);
-                if (skipped > 0 && skipLog.length() > 0) {
-                    AppFonts.install(new MaterialAlertDialogBuilder(MainActivity.this)
-                        .setTitle(result)
-                        .setMessage(getString(R.string.main_skip_reasons, skipLog.toString()))
-                        .setPositiveButton(getString(R.string.action_ok), null)
-                        .setOnDismissListener(dismissed -> {
-                            if (importedChanges) maybePromptCalendarSetup();
-                        })
-                        .show());
-                } else {
-                    Toast.makeText(this, result, Toast.LENGTH_LONG).show();
-                    if (importedChanges) maybePromptCalendarSetup();
-                }
-            })
-            .setNegativeButton(getString(R.string.action_cancel), null)
-            .show());
+    private String importFilename(Uri uri) {
+        try (android.database.Cursor cursor = getContentResolver().query(uri,
+                new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int column = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (column >= 0) return cursor.getString(column);
+            }
+        } catch (RuntimeException ignored) {
+            // Providers need not expose a display name; content-signature detection still works.
+        }
+        return uri.getLastPathSegment();
     }
 
     private byte[] readUriBytes(Uri uri, int maxBytes) throws IOException, ImportException {
@@ -5024,24 +5527,6 @@ public class MainActivity extends AppCompatActivity {
         return builder.toString();
     }
 
-    private Course findImportedCourseMatch(List<Course> source, Course draft) {
-        for (Course course : source) {
-            if (course.day == draft.day
-                    && course.period == draft.period
-                    && course.endPeriod == draft.endPeriod
-                    && sameCourseText(course.name, draft.name)
-                    && TimetableRules.sameWeekExpression(course.weeks, draft.weeks)) {
-                return course;
-            }
-        }
-        return null;
-    }
-
-    private boolean sameCourseText(String left, String right) {
-        return TimetableRules.normalizedCourseText(cleanField(left == null ? "" : left))
-                .equals(TimetableRules.normalizedCourseText(cleanField(right == null ? "" : right)));
-    }
-
     private boolean periodsOverlap(Course left, Course right) {
         return left.period <= right.endPeriod && right.period <= left.endPeriod;
     }
@@ -5099,13 +5584,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private long calendarStartMillis() {
-        return getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .getLong(CALENDAR_START_KEY, dateMillis(2026, Calendar.MARCH, 2));
+        return AcademicCalendarStore.startMillis(getSharedPreferences(PREFS_NAME, MODE_PRIVATE));
     }
 
     private long calendarEndMillis() {
-        return getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .getLong(CALENDAR_END_KEY, dateMillis(2026, Calendar.JULY, 19));
+        return AcademicCalendarStore.endMillis(getSharedPreferences(PREFS_NAME, MODE_PRIVATE));
     }
 
     private long startOfTodayMillis() {
@@ -5130,21 +5613,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String formatDate(long millis) {
-        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new java.util.Date(millis));
-    }
-
-    private Long parseDateMillis(String value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-            format.setLenient(false);
-            java.util.Date date = format.parse(value.trim());
-            return date == null ? null : startOfDayMillis(date.getTime());
-        } catch (Exception ignored) {
-            return null;
-        }
+        return CalendarSetupDialog.formatDate(millis);
     }
 
     private long startOfDayMillis(long millis) {
@@ -5408,7 +5877,7 @@ public class MainActivity extends AppCompatActivity {
                 new int[]{glassPanelTopColor(), glassPanelBottomColor()}
         );
         drawable.setCornerRadius(radius);
-        drawable.setStroke(dp(2), glassOuterEdgeColor());
+        drawable.setStroke(dp(isDarkMode ? 1 : 2), glassOuterEdgeColor());
         return drawable;
     }
 
@@ -5483,15 +5952,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int bgColor() {
-        return isDarkMode ? Color.rgb(15, 18, 23) : Color.rgb(245, 248, 252);
+        return isDarkMode ? DarkUiPalette.BACKGROUND : Color.rgb(245, 248, 252);
     }
 
     private int cardColor() {
-        return isDarkMode ? Color.rgb(27, 31, 38) : Color.rgb(255, 255, 255);
+        return isDarkMode ? DarkUiPalette.SURFACE : Color.rgb(255, 255, 255);
     }
 
     private int segmentedTrackColor() {
-        return isDarkMode ? Color.rgb(22, 26, 32) : Color.rgb(236, 242, 249);
+        return isDarkMode ? DarkUiPalette.RAISED : Color.rgb(236, 242, 249);
     }
 
     private int pressedButtonColor(int color) {
@@ -5499,15 +5968,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int primaryTextColor() {
-        return isDarkMode ? Color.rgb(243, 246, 250) : Color.rgb(18, 24, 33);
+        return isDarkMode ? DarkUiPalette.INK : Color.rgb(18, 24, 33);
     }
 
     private int secondaryTextColor() {
-        return isDarkMode ? Color.rgb(164, 173, 184) : Color.rgb(91, 101, 114);
+        return isDarkMode ? DarkUiPalette.SECONDARY : Color.rgb(91, 101, 114);
     }
 
     private int borderColor() {
-        return isDarkMode ? Color.rgb(51, 59, 70) : Color.rgb(221, 228, 238);
+        return isDarkMode ? DarkUiPalette.LINE : Color.rgb(221, 228, 238);
     }
 
     private int accentColor() {
@@ -5543,6 +6012,10 @@ public class MainActivity extends AppCompatActivity {
         return ACCENT_PRESETS[index][dark ? 1 : 0];
     }
 
+    static boolean isDarkModeFor(Context context) {
+        return isDarkModeFor(context, context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE));
+    }
+
     private static boolean isDarkModeFor(Context context, SharedPreferences prefs) {
         int mode = prefs.getInt(THEME_KEY, 0);
         if (mode == 2) {
@@ -5566,66 +6039,19 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadCourses() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String encrypted = prefs.getString(COURSES_KEY, null);
-        String raw;
-        boolean migrateLegacy = false;
-        boolean encryptedSource = encrypted != null;
-        try {
-            if (encryptedSource) {
-                raw = secureStorage.decrypt(encrypted);
-            } else {
-                raw = prefs.getString(LEGACY_COURSES_KEY, "[]");
-                migrateLegacy = !raw.equals("[]");
-            }
-        } catch (Exception error) {
-            courses.clear();
-            storageLocked = true;
-            Toast.makeText(this, getString(R.string.main_courses_decrypt_failed), Toast.LENGTH_LONG).show();
+        StoredTimetableSnapshot.Courses loaded = StoredTimetableSnapshot.readCourses(prefs, periodCount(), COURSE_COLORS);
+        courses.clear();
+        courses.addAll(loaded.items);
+        storageLocked = !loaded.readable;
+        if (storageLocked) {
+            Toast.makeText(this, getString("decrypt".equals(loaded.error)
+                    ? R.string.main_courses_decrypt_failed : R.string.main_courses_corrupt), Toast.LENGTH_LONG).show();
             return;
         }
-
-        courses.clear();
-        try {
-            JSONArray array = new JSONArray(raw);
-            int invalidWeekCount = 0;
-            for (int i = 0; i < array.length(); i++) {
-                JSONObject object = array.getJSONObject(i);
-                Course course = new Course();
-                course.id = object.optLong("id", System.currentTimeMillis() + i);
-                course.day = clamp(object.optInt("day", 0), 0, dayNames.length - 1);
-                course.period = clamp(object.optInt("period", 1), 1, periodCount());
-                course.endPeriod = clamp(object.optInt("endPeriod", course.period), course.period, periodCount());
-                course.name = cleanField(object.optString("name", ""));
-                course.weeks = cleanField(object.optString("weeks", ""));
-                course.invalidWeeks = !TimetableRules.parseWeeks(course.weeks).valid;
-                if (course.invalidWeeks) {
-                    invalidWeekCount++;
-                }
-                course.room = cleanField(object.optString("room", ""));
-                course.teacher = cleanField(object.optString("teacher", ""));
-                course.color = safeColor(object.optInt("color", COURSE_COLORS[i % COURSE_COLORS.length]));
-                if (!course.name.isEmpty()) {
-                    courses.add(course);
-                }
-                if (courses.size() >= MAX_COURSES) {
-                    break;
-                }
-            }
-            if (migrateLegacy) {
-                saveCourses(courses);
-            }
-            if (invalidWeekCount > 0) {
-                Toast.makeText(
-                        this,
-                        getResources().getQuantityString(R.plurals.main_invalid_weeks, invalidWeekCount, invalidWeekCount),
-                        Toast.LENGTH_LONG
-                ).show();
-            }
-        } catch (Exception ignored) {
-            courses.clear();
-            storageLocked = encryptedSource;
-            Toast.makeText(this, getString(R.string.main_courses_corrupt), Toast.LENGTH_LONG).show();
-        }
+        if (loaded.legacyNeedsMigration) saveCourses(courses);
+        if (loaded.invalidWeekCount > 0) Toast.makeText(this,
+                getResources().getQuantityString(R.plurals.main_invalid_weeks,
+                        loaded.invalidWeekCount, loaded.invalidWeekCount), Toast.LENGTH_LONG).show();
     }
 
     @SuppressLint("ApplySharedPref") // 依赖 commit 返回值判断课程数据写入成败，不能改 apply
@@ -5706,38 +6132,12 @@ public class MainActivity extends AppCompatActivity {
     // ---------------------------------------------------------------- personal events
 
     private void loadPersonalEvents() {
+        StoredTimetableSnapshot.Events loaded = StoredTimetableSnapshot.readEvents(
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE));
         personalEvents.clear();
-        eventsLocked = false;
-        String encrypted = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(EVENTS_KEY, null);
-        if (encrypted == null || encrypted.isEmpty()) {
-            return;
-        }
-        try {
-            JSONArray array = new JSONArray(secureStorage.decrypt(encrypted));
-            for (int i = 0; i < array.length() && personalEvents.size() < PersonalEvent.MAX_EVENTS; i++) {
-                JSONObject o = array.optJSONObject(i);
-                if (o == null) {
-                    continue;
-                }
-                PersonalEvent e = new PersonalEvent();
-                e.id = o.optLong("id", 0L);
-                e.year = o.optInt("year", 0);
-                e.month = o.optInt("month", 0);
-                e.day = o.optInt("day", 0);
-                e.startMinutes = o.optInt("start", -1);
-                e.endMinutes = o.optInt("end", PersonalEvent.NO_END);
-                e.remindMinutes = o.optInt("remind", PersonalEvent.NO_REMINDER);
-                e.title = o.optString("title", "").trim();
-                e.location = o.optString("location", "").trim();
-                e.note = o.optString("note", "").trim();
-                e.showInTimetable = o.optBoolean("showInTimetable", true);
-                if (e.id != 0L && e.validate() == null) {
-                    personalEvents.add(e);
-                }
-            }
-        } catch (Exception error) {
-            personalEvents.clear();
-            eventsLocked = true;
+        personalEvents.addAll(loaded.items);
+        eventsLocked = !loaded.readable;
+        if (eventsLocked) {
             Toast.makeText(this, getString(R.string.main_events_unreadable), Toast.LENGTH_LONG).show();
         }
     }
@@ -5804,7 +6204,7 @@ public class MainActivity extends AppCompatActivity {
         }
         List<PastelTimetableView.EventEntry> visible = new ArrayList<>();
         for (PersonalEvent e : personalEvents) {
-            if (!e.showInTimetable) continue;
+            if (!displayMode.showsEvents() || !e.showInTimetable) continue;
             long date = e.dayMillis();
             for (int day = 0; day < 7; day++) {
                 if (dates[day] == date) {
@@ -5812,6 +6212,7 @@ public class MainActivity extends AppCompatActivity {
                     entry.id = e.id;
                     entry.day = day;
                     entry.startMinutes = e.startMinutes;
+                    entry.endMinutes = e.endMinutes;
                     entry.endMillis = e.endMillis();
                     entry.hasEnd = e.endMinutes != PersonalEvent.NO_END;
                     entry.title = e.title;
@@ -5823,12 +6224,13 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         pastelTimetable.setEvents(visible, labels, dates);
-        if (minePage != null) minePage.setEvents(new ArrayList<>(personalEvents));
+        refreshMinePage();
     }
 
     private void showPersonalEventDetail(PersonalEvent event) {
+        if (!mayOpenModal()) return;
         if (eventFromMine && pastelTimetable != null) pastelTimetable.setMineSelected(true);
-        PastelCourseSheet sheet = new PastelCourseSheet(this, isDarkMode, pastelAccent());
+        PastelCourseSheet sheet = newModalSheet();
         activeEventDetail = sheet;
         activeEventDetailId = event.id;
         Bundle restored = pendingDetailRestore;
@@ -5849,6 +6251,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showPersonalEventEditor(PersonalEvent editing) {
+        showPersonalEventEditor(editing, null);
+    }
+
+    private void showPersonalEventEditor(PersonalEvent editing, Long requestedDate) {
+        if (!mayOpenModal()) return;
         if (eventFromMine && pastelTimetable != null) pastelTimetable.setMineSelected(true);
         if (eventsLocked) {
             Toast.makeText(this, getString(R.string.main_events_locked_edit), Toast.LENGTH_LONG).show();
@@ -5881,8 +6288,15 @@ public class MainActivity extends AppCompatActivity {
                 draft.month = shown.get(Calendar.MONTH) + 1;
                 draft.day = shown.get(Calendar.DAY_OF_MONTH);
             }
+            if (requestedDate != null) {
+                Calendar selected = Calendar.getInstance();
+                selected.setTimeInMillis(requestedDate);
+                draft.year = selected.get(Calendar.YEAR);
+                draft.month = selected.get(Calendar.MONTH) + 1;
+                draft.day = selected.get(Calendar.DAY_OF_MONTH);
+            }
         }
-        PastelCourseSheet sheet = new PastelCourseSheet(this, isDarkMode, pastelAccent());
+        PastelCourseSheet sheet = newModalSheet();
         activeEventEditor = sheet;
         activeEventId = editing == null ? 0 : editing.id;
         Bundle restored = pendingEventRestore;
@@ -5916,8 +6330,8 @@ public class MainActivity extends AppCompatActivity {
             String error = savePersonalEvents(next);
             if (error == null) {
                 Toast.makeText(this, editing == null ? getString(R.string.main_event_added) : getString(R.string.main_event_saved), Toast.LENGTH_SHORT).show();
-                if (pastelTimetable != null && !eventFromMine && candidate.showInTimetable) {
-                    pastelTimetable.showAgenda();
+                if (pastelTimetable != null && displayMode.showsEvents() && !eventFromMine && candidate.showInTimetable) {
+                    if (displayMode != DisplayMode.AGENDA) pastelTimetable.showAgenda();
                     browsePastelDate(candidate.dayMillis());
                 }
             }
@@ -5933,16 +6347,24 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, error == null ? getString(R.string.main_event_deleted) : error, Toast.LENGTH_SHORT).show();
             return error == null;
         }, restored, () -> {
-            activeEventEditor = null;
-            activeEventId = 0;
-            if (eventFromMine && !isChangingConfigurations() && !isFinishing()) showMineSheet();
+            if (activeEventEditor == sheet) {
+                activeEventEditor = null;
+                activeEventId = 0;
+            }
+            if (eventFromMine && !isChangingConfigurations() && !isFinishing() && !isDestroyed()) showMineSheet();
         });
     }
 
     private void showMineSheet() {
         if (pastelTimetable == null) return;
         pastelTimetable.setMineSelected(true);
-        if (minePage != null) minePage.setEvents(new ArrayList<>(personalEvents));
+        refreshMinePage();
+    }
+
+    private void refreshMinePage() {
+        if (minePage == null) return;
+        minePage.setDisplayMode(displayMode);
+        minePage.setEvents(displayMode.showsEvents() ? new ArrayList<>(personalEvents) : Collections.emptyList());
     }
 
     private String cleanField(String value) {
@@ -6351,87 +6773,5 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private static class Course implements CourseColorRules.Item {
-        long id;
-        int day;
-        int period;
-        int endPeriod = 1;
-        String name = "";
-        String weeks = "";
-        String room = "";
-        String teacher = "";
-        int color = COURSE_COLORS[0];
-        boolean temporary = false;
-        boolean invalidWeeks = false;
-        int customStartMinutes = -1;
-        int customEndMinutes = -1;
-
-        @Override public String colorName() { return name; }
-        @Override public int colorValue() { return color; }
-        @Override public void setColorValue(int value) { color = value; }
-        @Override public boolean temporaryColor() { return temporary; }
-
-        String periodLabel() {
-            if (endPeriod > period) {
-                return UiLang.t("第" + period + "-" + endPeriod + "节", "第" + period + "-" + endPeriod + "節",
-                        "Periods " + period + "–" + endPeriod);
-            }
-            return UiLang.t("第" + period + "节", "第" + period + "節", "Period " + period);
-        }
-
-        String periodBadgeText() {
-            if (endPeriod > period) {
-                return UiLang.t("第\n" + period + "-" + endPeriod + "\n节", "第\n" + period + "-" + endPeriod + "\n節",
-                        "Periods\n" + period + "–" + endPeriod);
-            }
-            return UiLang.t("第\n" + period + "\n节", "第\n" + period + "\n節", "Period\n" + period);
-        }
-
-        String secondaryText() {
-            List<String> parts = new ArrayList<>();
-            if (invalidWeeks) {
-                parts.add(UiLang.t("⚠ 上课周格式需修正", "⚠ 上課週格式需修正", "⚠ Weeks need fixing"));
-            }
-            if (weeks != null && !weeks.isEmpty()) {
-                parts.add(weeks);
-            }
-            if (room != null && !room.isEmpty()) {
-                parts.add(room);
-            }
-            if (teacher != null && !teacher.isEmpty()) {
-                parts.add(teacher);
-            }
-            return parts.isEmpty() ? UiLang.t("暂无上课周、地点和老师信息", "暫無上課週、地點和老師資訊", "No weeks, location or teacher") : join(parts, " · ");
-        }
-
-        Course copy() {
-            Course copy = new Course();
-            copy.id = id;
-            copy.day = day;
-            copy.period = period;
-            copy.endPeriod = endPeriod;
-            copy.name = name;
-            copy.weeks = weeks;
-            copy.room = room;
-            copy.teacher = teacher;
-            copy.color = color;
-            copy.temporary = temporary;
-            copy.invalidWeeks = invalidWeeks;
-            copy.customStartMinutes = customStartMinutes;
-            copy.customEndMinutes = customEndMinutes;
-            return copy;
-        }
-
-        private static String join(List<String> parts, String separator) {
-            StringBuilder builder = new StringBuilder();
-            for (int i = 0; i < parts.size(); i++) {
-                if (i > 0) {
-                    builder.append(separator);
-                }
-                builder.append(parts.get(i));
-            }
-            return builder.toString();
-        }
-    }
 }
 

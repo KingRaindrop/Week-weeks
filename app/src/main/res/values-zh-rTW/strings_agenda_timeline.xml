@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agenda_timeline_time_heading">時間</string>
+    <string name="agenda_timeline_events_title">選擇日程</string>
+    <string name="agenda_timeline_group_description">%1$s，%2$d項日程，點按選擇。%3$s</string>
+    <plurals name="agenda_timeline_event_count">
+        <item quantity="other">%d項日程</item>
+    </plurals>
+</resources>

@@ -16,17 +16,21 @@ public class EventVisibilityFlowTest {
 
     @Test public void visibilityIsPersistedAndLegacyEventsRemainVisible() throws Exception {
         String activity = source("MainActivity");
-        assertTrue(activity.contains("e.showInTimetable = o.optBoolean(\"showInTimetable\", true)"));
+        assertTrue(activity.contains("StoredTimetableSnapshot.readEvents("));
+        assertTrue(source("StoredTimetableSnapshot").contains("event.showInTimetable = o.optBoolean(\"showInTimetable\", true)"));
         assertTrue(activity.contains("o.put(\"showInTimetable\", e.showInTimetable)"));
     }
 
-    @Test public void onlyTimetableIsFilteredAndHiddenEventDoesNotNavigate() throws Exception {
+    @Test public void individualVisibilityFiltersTimetableWhileDisplayModeAlsoControlsMine() throws Exception {
         String activity = source("MainActivity");
         String binding = activity.substring(activity.indexOf("private void bindPastelEvents("),
                 activity.indexOf("private void showPersonalEventDetail("));
-        assertTrue(binding.contains("if (!e.showInTimetable) continue;"));
-        assertTrue(binding.contains("minePage.setEvents(new ArrayList<>(personalEvents))"));
-        assertTrue(activity.contains("!eventFromMine && candidate.showInTimetable"));
+        assertTrue(binding.contains("if (!displayMode.showsEvents() || !e.showInTimetable) continue;"));
+        assertTrue(binding.contains("refreshMinePage();"));
+        String mine = activity.substring(activity.indexOf("private void refreshMinePage("),
+                activity.indexOf("private String cleanField("));
+        assertTrue(mine.contains("minePage.setEvents(displayMode.showsEvents() ? new ArrayList<>(personalEvents) : Collections.emptyList())"));
+        assertTrue(activity.contains("displayMode.showsEvents() && !eventFromMine && candidate.showInTimetable"));
     }
 
     @Test public void editorRestoresVisibilityAndDetectsUnsavedToggle() throws Exception {

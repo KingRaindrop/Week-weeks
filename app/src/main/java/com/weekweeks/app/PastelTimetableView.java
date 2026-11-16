@@ -34,20 +34,25 @@ import java.util.regex.Pattern;
 
 /** Dependency-free, presentation-only timetable. Days are Monday=0; periods are 1-based. */
 public class PastelTimetableView extends FrameLayout {
-    public static class Entry {
+    public static class Entry implements CourseOverlapLayout.Item {
         long id;
         int day, start, end, color;
         String name, room, time, period, teacherLabel;
+        public int overlapDay() { return day; }
+        public int overlapStart() { return start; }
+        public int overlapEnd() { return end; }
     }
 
     /** A personal agenda item shown in the list and independent week event strip. */
-    public static class EventEntry implements WeekEventLayout.Item {
+    public static class EventEntry implements WeekEventLayout.Item, AgendaTimelineLayout.Item {
         long id, endMillis;
         boolean hasEnd;
         int day, startMinutes;
+        int endMinutes = -1;
         String title, time, location;
         @Override public int eventDay() { return day; }
         @Override public int eventStartMinutes() { return startMinutes; }
+        @Override public int eventEndMinutes() { return endMinutes; }
         @Override public long eventId() { return id; }
     }
 
@@ -59,6 +64,7 @@ public class PastelTimetableView extends FrameLayout {
         void onAdd(int day, int period);
         /** Tap: read-only course details. */
         void onCourse(long id);
+        void onCourses(long[] ids);
         /** Long press: open the editor. Kept separate from tap to avoid accidental edits. */
         void onEditCourse(long id);
         void onPreviousWeek();
@@ -68,7 +74,10 @@ public class PastelTimetableView extends FrameLayout {
         /** The hero countdown reached zero: a class just started or ended. Re-bind fresh data. */
         void onCountdownFinished();
         void onAddEvent();
+        void onAddEventOnDate(long dateMillis);
         void onEvent(long id);
+        /** Choose an event when several visible timeline blocks share a narrow day column. */
+        default void onEvents(long[] ids) { if (ids != null && ids.length > 0) onEvent(ids[0]); }
         /** 「我的」tab: personal agenda management and settings. */
         void onMine();
     }
@@ -78,8 +87,12 @@ public class PastelTimetableView extends FrameLayout {
     private final boolean dark;
     private final Actions actions;
     private final int background, surface, ink, muted, line, coral;
+    private final UiSemanticPalette uiColors;
+    private final int bottomHeight;
     private final PastelAccent theme;
     private final LinearLayout content, hero, list, bottom;
+    private final FrameLayout heroFrame;
+    private final View importButton;
     private final ScrollView scroll;
     private final TextView status, heroTitle, heroTime, heroRoom, heroPeriod, countdown;
     private long countdownTarget = -1;
@@ -87,7 +100,7 @@ public class PastelTimetableView extends FrameLayout {
     private final Runnable countdownTick = new Runnable() {
         @Override public void run() {
             updateCountdown();
-            if (countdownTarget > 0 && isAttachedToWindow()) {
+            if (displayMode.showsCourses() && countdownTarget > 0 && isAttachedToWindow()) {
                 long now = System.currentTimeMillis();
                 long remaining = countdownTarget - now;
                 // mm:ss below one hour: tick on each whole second. Otherwise only minutes are shown,
@@ -99,7 +112,7 @@ public class PastelTimetableView extends FrameLayout {
             }
         }
     };
-    private final TextView weekTitle, previous, next, current, weekSegment, listSegment, notice;
+    private final TextView weekTitle, previous, next, current, weekSegment, listSegment, notice, modeLabel;
     private final TextView[] tabLabels = new TextView[3];
     private final IconView[] tabIcons = new IconView[3];
     private final WeekGrid grid;
@@ -112,6 +125,9 @@ public class PastelTimetableView extends FrameLayout {
     private final int[] dayRank = {0, 1, 2, 3, 4, 5, 6};
     private final List<String> times = new ArrayList<>();
     private boolean listMode, preview, storageLocked, actualWeek;
+    private DisplayMode displayMode = DisplayMode.COMBINED;
+    private String featureStatus;
+    private String suppliedEmptyMessage;
     private Entry featured;
     private final String HINT = s(R.string.view_hint);
     private String emptyMessage = s(R.string.view_empty_default);
@@ -127,12 +143,15 @@ public class PastelTimetableView extends FrameLayout {
         this.dark = dark;
         this.theme = theme == null ? PastelAccent.classic(dark) : theme;
         this.actions = actions;
-        background = color(dark ? "#111622" : "#F7F8FE");
-        surface = color(dark ? "#1C2433" : "#FFFFFF");
-        ink = color(dark ? "#F1F3FB" : "#25314D");
-        muted = color(dark ? "#A9B4CB" : "#8A93AA");
-        line = color(dark ? "#303B50" : "#EDF0F8");
-        coral = this.theme.accent;
+        uiColors = UiSemanticPalette.of(dark, this.theme.accent);
+        background = uiColors.background;
+        surface = uiColors.surface;
+        ink = uiColors.text;
+        muted = uiColors.secondary;
+        line = uiColors.divider;
+        coral = uiColors.accent;
+        float fontScale = Math.max(1f, getResources().getConfiguration().fontScale);
+        bottomHeight = dp(Math.max(62, 38 + 14 * fontScale));
         setBackgroundColor(background);
         setClipToPadding(true);
         scroll = new ScrollView(context);
@@ -140,7 +159,7 @@ public class PastelTimetableView extends FrameLayout {
         scroll.setClipToPadding(false);
         scroll.setVerticalScrollBarEnabled(false);
         FrameLayout.LayoutParams scrolling = new FrameLayout.LayoutParams(-1, -1);
-        scrolling.bottomMargin = dp(62);
+        scrolling.bottomMargin = bottomHeight;
         addView(scroll, scrolling);
         content = column();
         content.setPadding(dp(14), 0, dp(14), dp(10));
@@ -148,42 +167,55 @@ public class PastelTimetableView extends FrameLayout {
 
         LinearLayout header = row();
         header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setMinimumHeight(dp(52));
         IconView cap = new IconView(context, "cap", ink);
         header.addView(cap, new LinearLayout.LayoutParams(dp(31), dp(32)));
         TextView title = text(s(R.string.view_title), 23, ink, true);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -1, 1);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1);
         titleParams.leftMargin = dp(8);
         header.addView(title, titleParams);
-        header.addView(iconButton("import", s(R.string.view_import_timetable), () -> { if (actions != null) actions.onImport(); }), new LinearLayout.LayoutParams(dp(44), dp(44)));
+        importButton = iconButton("import", s(R.string.view_import_timetable), () -> {
+            if (displayMode.showsCourses() && actions != null) actions.onImport();
+        });
+        header.addView(importButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
         header.addView(iconButton(dark ? "sun" : "moon", dark ? s(R.string.view_switch_light) : s(R.string.view_switch_dark),
                 () -> { if (actions != null) actions.onToggleTheme(); }), new LinearLayout.LayoutParams(dp(44), dp(44)));
         header.addView(iconButton("settings", s(R.string.view_timetable_settings), () -> { if (actions != null) actions.onSettings(); }), new LinearLayout.LayoutParams(dp(44), dp(44)));
-        content.addView(header, new LinearLayout.LayoutParams(-1, dp(52)));
+        content.addView(header, new LinearLayout.LayoutParams(-1, -2));
+        modeLabel = text(s(R.string.ui_refinement_content_mode, s(R.string.ui_refinement_mode_combined)), 11, muted, false);
+        modeLabel.setTag("timetable:mode_label");
+        modeLabel.setPadding(dp(2), 0, dp(2), dp(6));
+        modeLabel.setMaxLines(2);
+        modeLabel.setEllipsize(TextUtils.TruncateAt.END);
+        content.addView(modeLabel, new LinearLayout.LayoutParams(-1, -2));
 
-        FrameLayout heroFrame = new FrameLayout(context);
+        heroFrame = new FrameLayout(context);
         GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{this.theme.heroStart, this.theme.heroEnd});
         gradient.setCornerRadius(dp(24));
+        if (dark) gradient.setStroke(dp(1), Color.argb(24, 255, 255, 255));
         heroFrame.setBackground(gradient);
         hero = column();
         hero.setPadding(dp(18), dp(12), dp(92), dp(10));
         heroFrame.addView(hero, new FrameLayout.LayoutParams(-1, -1));
-        status = text(s(R.string.view_status_schedule), 10, color("#55451A"), true);
+        status = text(s(R.string.view_status_schedule), 10, dark ? coral : color("#55451A"), true);
         status.setPadding(dp(9), dp(3), dp(9), dp(3));
-        status.setBackground(round(color("#FFE6A0"), 12));
+        status.setBackground(round(dark ? this.theme.tint : color("#FFE6A0"), 12));
         LinearLayout statusRow = row();
         statusRow.setGravity(Gravity.CENTER_VERTICAL);
         statusRow.addView(status, new LinearLayout.LayoutParams(-2, -2));
-        countdown = text("", 10, Color.WHITE, true);
+        countdown = text("", 10, dark ? ink : Color.WHITE, true);
         countdown.setSingleLine(true);
         countdown.setPadding(dp(9), dp(3), dp(9), dp(3));
-        countdown.setBackground(round(Color.argb(46, 255, 255, 255), 12));
+        countdown.setBackground(round(Color.argb(dark ? 32 : 46, 255, 255, 255), 12));
         countdown.setVisibility(GONE);
         LinearLayout.LayoutParams cdp = new LinearLayout.LayoutParams(-2, -2);
         cdp.leftMargin = dp(6);
         statusRow.addView(countdown, cdp);
         hero.addView(statusRow, new LinearLayout.LayoutParams(-2, -2));
-        heroTitle = text(s(R.string.view_hero_new_day), 19, Color.WHITE, true);
+        heroTitle = text(s(R.string.view_hero_new_day), 19, dark ? ink : Color.WHITE, true);
         heroTitle.setMaxLines(1);
         heroTitle.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams ht = new LinearLayout.LayoutParams(-1, -2);
@@ -221,6 +253,7 @@ public class PastelTimetableView extends FrameLayout {
 
         LinearLayout navigation = row();
         navigation.setGravity(Gravity.CENTER_VERTICAL);
+        int navigationHeight = dp(Math.max(40, 8 + 30 * fontScale));
         previous = nav("‹", s(R.string.view_previous_week), () -> { if (actions != null) actions.onPreviousWeek(); });
         next = nav("›", s(R.string.view_next_week), () -> { if (actions != null) actions.onNextWeek(); });
         weekTitle = text(s(R.string.view_this_week), 13, ink, true);
@@ -229,28 +262,34 @@ public class PastelTimetableView extends FrameLayout {
         weekTitle.setEllipsize(TextUtils.TruncateAt.END);
         weekTitle.setOnClickListener(v -> { if (actions != null) actions.onPickWeek(); });
         weekTitle.setContentDescription(s(R.string.view_pick_week_desc));
-        navigation.addView(previous, new LinearLayout.LayoutParams(dp(38), dp(40)));
-        navigation.addView(weekTitle, new LinearLayout.LayoutParams(0, dp(40), 1));
-        navigation.addView(next, new LinearLayout.LayoutParams(dp(38), dp(40)));
+        navigation.addView(previous, new LinearLayout.LayoutParams(dp(38), navigationHeight));
+        navigation.addView(weekTitle, new LinearLayout.LayoutParams(0, navigationHeight, 1));
+        navigation.addView(next, new LinearLayout.LayoutParams(dp(38), navigationHeight));
         current = text(s(R.string.view_this_week_short), 11, coral, true);
         current.setGravity(Gravity.CENTER);
         current.setOnClickListener(v -> { if (actions != null) actions.onCurrentWeek(); });
         current.setContentDescription(s(R.string.view_back_to_this_week));
-        navigation.addView(current, new LinearLayout.LayoutParams(dp(43), dp(40)));
-        content.addView(navigation, new LinearLayout.LayoutParams(-1, dp(40)));
+        current.setMaxLines(2);
+        current.setEllipsize(TextUtils.TruncateAt.END);
+        navigation.addView(current, new LinearLayout.LayoutParams(dp(43), navigationHeight));
+        content.addView(navigation, new LinearLayout.LayoutParams(-1, navigationHeight));
 
         LinearLayout segments = row();
         segments.setPadding(dp(3), dp(3), dp(3), dp(3));
-        segments.setBackground(round(this.theme.track, 13));
-        weekSegment = text(s(R.string.view_segment_week), 12, Color.WHITE, true);
-        listSegment = text(s(R.string.view_segment_list), 12, coral, true);
+        segments.setBackground(round(uiColors.inset, 13));
+        weekSegment = text(s(R.string.ui_refinement_layout_week), 12, uiColors.onAccent, true);
+        listSegment = text(s(R.string.ui_refinement_layout_list), 12, muted, true);
         weekSegment.setGravity(Gravity.CENTER);
         listSegment.setGravity(Gravity.CENTER);
+        weekSegment.setSingleLine(true);
+        listSegment.setSingleLine(true);
+        weekSegment.setEllipsize(TextUtils.TruncateAt.END);
+        listSegment.setEllipsize(TextUtils.TruncateAt.END);
         segments.addView(weekSegment, new LinearLayout.LayoutParams(0, -1, 1));
         segments.addView(listSegment, new LinearLayout.LayoutParams(0, -1, 1));
         weekSegment.setOnClickListener(v -> setListMode(false));
         listSegment.setOnClickListener(v -> setListMode(true));
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(36));
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(14 + 22 * fontScale));
         sp.bottomMargin = dp(9);
         content.addView(segments, sp);
 
@@ -259,40 +298,39 @@ public class PastelTimetableView extends FrameLayout {
         list = column();
         list.setVisibility(GONE);
         content.addView(list, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout announcement = row();
-        announcement.setGravity(Gravity.CENTER_VERTICAL);
-        announcement.setPadding(dp(11), dp(9), dp(9), dp(9));
-        announcement.setBackground(round(this.theme.banner, 12));
-        announcement.addView(new IconView(context, "megaphone", color("#D9AC40")), new LinearLayout.LayoutParams(dp(21), dp(21)));
-        notice = text(HINT, 11, dark ? muted : color("#62668B"), false);
-        notice.setGravity(Gravity.CENTER_VERTICAL);
-        notice.setPadding(dp(8), 0, dp(5), 0);
-        announcement.addView(notice, new LinearLayout.LayoutParams(0, -2, 1));
-        announcement.addView(new IconView(context, "chevron", muted), new LinearLayout.LayoutParams(dp(16), dp(20)));
+        notice = text(HINT, 11, muted, false);
+        notice.setTag("timetable:notice");
+        notice.setPadding(dp(3), dp(3), dp(3), dp(3));
+        notice.setClickable(false);
+        notice.setFocusable(false);
         LinearLayout.LayoutParams announcementParams = new LinearLayout.LayoutParams(-1, -2);
         announcementParams.topMargin = dp(9);
-        content.addView(announcement, announcementParams);
+        content.addView(notice, announcementParams);
 
         bottom = row();
         bottom.setGravity(Gravity.CENTER);
-        bottom.setBackgroundColor(surface);
+        bottom.setBackground(bottomBarBackground());
         bottom.setElevation(dp(8));
-        String[] labels = {s(R.string.view_tab_timetable), s(R.string.view_tab_agenda), s(R.string.view_tab_mine)};
-        String[] icons = {"grid", "calendar", "profile"};
+        String[] labels = {s(R.string.ui_refinement_layout_week), s(R.string.ui_refinement_layout_list), s(R.string.view_tab_mine)};
+        String[] icons = {"grid", "list", "profile"};
+        String[] tabTags = {"nav:week", "nav:list", "nav:mine"};
         for (int i = 0; i < labels.length; i++) {
             final int tab = i;
             LinearLayout item = column();
             item.setGravity(Gravity.CENTER);
+            item.setTag(tabTags[i]);
             tabIcons[i] = new IconView(context, icons[i], i == 0 ? coral : muted);
             item.addView(tabIcons[i], new LinearLayout.LayoutParams(dp(24), dp(24)));
             tabLabels[i] = text(labels[i], 10, i == 0 ? coral : muted, i == 0);
             tabLabels[i].setGravity(Gravity.CENTER);
+            tabLabels[i].setSingleLine(true);
+            tabLabels[i].setEllipsize(TextUtils.TruncateAt.END);
             item.addView(tabLabels[i]);
             item.setContentDescription(labels[i]);
             item.setOnClickListener(v -> selectTab(tab));
             bottom.addView(item, new LinearLayout.LayoutParams(0, -1, 1));
         }
-        addView(bottom, new FrameLayout.LayoutParams(-1, dp(62), Gravity.BOTTOM));
+        addView(bottom, new FrameLayout.LayoutParams(-1, bottomHeight, Gravity.BOTTOM));
         setOnApplyWindowInsetsListener((v, insets) -> {
             int left, top, right, bottomInset;
             if (Build.VERSION.SDK_INT >= 30) {
@@ -325,6 +363,8 @@ public class PastelTimetableView extends FrameLayout {
         if (newTimes != null) times.addAll(newTimes);
         this.preview = preview;
         this.featured = featured;
+        this.featureStatus = featureStatus;
+        this.suppliedEmptyMessage = emptyMessage;
         this.storageLocked = storageLocked;
         this.emptyMessage = nonempty(emptyMessage, s(R.string.view_empty_default));
         String label = nonempty(weekLabel, s(R.string.view_teaching_week));
@@ -335,12 +375,44 @@ public class PastelTimetableView extends FrameLayout {
         previous.setAlpha(canPrevious ? 1f : .3f);
         next.setEnabled(canNext);
         next.setAlpha(canNext ? 1f : .3f);
+        updateModePresentation();
+        grid.updateHeight();
+        renderedFinishedKey = finishedKey();
+        grid.rebuild();
+        rebuildList();
+    }
+
+    /** Filters presentation without changing the selected layout, backing data or reminders. */
+    public void setDisplayMode(DisplayMode mode) {
+        DisplayMode nextMode = mode == null ? DisplayMode.COMBINED : mode;
+        if (displayMode == nextMode) return;
+        displayMode = nextMode;
+        updateModePresentation();
+        removeCallbacks(countdownTick);
+        if (displayMode.showsCourses() && countdownTarget > 0 && isAttachedToWindow()) post(countdownTick);
+        grid.rebuild();
+        rebuildList();
+    }
+
+    private void updateModePresentation() {
+        int modeName = displayMode == DisplayMode.TIMETABLE ? R.string.ui_refinement_mode_courses
+                : displayMode == DisplayMode.AGENDA ? R.string.ui_refinement_mode_agenda : R.string.ui_refinement_mode_combined;
+        modeLabel.setText(s(R.string.ui_refinement_content_mode, s(modeName)));
+        notice.setTextColor(displayMode.showsCourses() && storageLocked ? uiColors.error : muted);
+        heroFrame.setVisibility(displayMode.showsCourses() ? VISIBLE : GONE);
+        importButton.setVisibility(displayMode.showsCourses() ? VISIBLE : GONE);
+        updateCountdown();
+        if (!displayMode.showsCourses()) {
+            notice.setText(s(R.string.display_mode_agenda_hint));
+            return;
+        }
         status.setText(nonempty(featureStatus, preview ? s(R.string.view_status_preview) : featured == null ? s(R.string.view_status_plan) : s(R.string.view_status_schedule)));
         if (featured == null) {
             heroTitle.setText(storageLocked ? s(R.string.view_hero_unavailable) : preview ? s(R.string.view_status_preview) : s(R.string.view_hero_free_time));
-            heroTime.setText(this.emptyMessage);
+            heroTime.setText(visibleEmptyMessage());
             heroRoom.setText(storageLocked ? s(R.string.view_hero_check_storage)
-                    : outsideSemester ? s(R.string.view_hero_outside_term) : s(R.string.view_hero_long_press_add));
+                    : outsideSemester ? s(displayMode.showsEvents() ? R.string.view_hero_outside_term
+                    : R.string.display_mode_course_outside_hint) : s(R.string.view_hero_long_press_add));
             heroPeriod.setText("");
         } else {
             heroTitle.setText(nonempty(featured.name, s(R.string.view_untitled_course)));
@@ -351,13 +423,17 @@ public class PastelTimetableView extends FrameLayout {
                     : s(R.string.view_period_single, featured.start)));
         }
         notice.setText(storageLocked ? s(R.string.view_notice_storage)
-                : outsideSemester ? s(R.string.view_notice_outside_term)
+                : outsideSemester ? s(displayMode.showsEvents() ? R.string.view_notice_outside_term
+                : R.string.display_mode_course_outside_hint)
                 : preview ? s(R.string.view_notice_preview)
-                : nonempty(emptyMessage, entries.isEmpty() ? this.emptyMessage : HINT));
-        grid.updateHeight();
-        renderedFinishedKey = finishedKey();
-        grid.rebuild();
-        rebuildList();
+                : nonempty(suppliedEmptyMessage, entries.isEmpty() ? this.emptyMessage : HINT));
+    }
+
+    private String visibleEmptyMessage() {
+        if (!displayMode.showsCourses()) return s(R.string.display_mode_agenda_empty);
+        if (!displayMode.showsEvents() && outsideSemester && !storageLocked)
+            return s(R.string.display_mode_course_outside_empty);
+        return emptyMessage;
     }
 
     /** Refresh the time overlay; rebuild cards only when a class has just ended. */
@@ -385,11 +461,11 @@ public class PastelTimetableView extends FrameLayout {
         if (target != countdownTarget || untilEnd != countdownUntilEnd) countdownFired = false;
         countdownTarget = target;
         countdownUntilEnd = untilEnd;
-        if (countdownTarget > 0 && isAttachedToWindow()) post(countdownTick); else updateCountdown();
+        if (displayMode.showsCourses() && countdownTarget > 0 && isAttachedToWindow()) post(countdownTick); else updateCountdown();
     }
 
     private void updateCountdown() {
-        if (countdownTarget <= 0 || preview || storageLocked) {
+        if (!displayMode.showsCourses() || countdownTarget <= 0 || preview || storageLocked) {
             countdown.setVisibility(GONE);
             return;
         }
@@ -400,7 +476,7 @@ public class PastelTimetableView extends FrameLayout {
             if (!countdownFired) {
                 countdownFired = true;
                 removeCallbacks(countdownTick);
-                if (actions != null) post(actions::onCountdownFinished);
+                if (actions != null) post(() -> { if (displayMode.showsCourses()) actions.onCountdownFinished(); });
             }
             return;
         }
@@ -441,7 +517,7 @@ public class PastelTimetableView extends FrameLayout {
         super.onAttachedToWindow();
         requestApplyInsets();
         removeCallbacks(countdownTick);
-        if (countdownTarget > 0) post(countdownTick);
+        if (displayMode.showsCourses() && countdownTarget > 0) post(countdownTick);
     }
 
     private void selectTab(int tab) {
@@ -452,21 +528,21 @@ public class PastelTimetableView extends FrameLayout {
 
     private View minePage;
 
-    /** Hosts the 「我的」 page as a full tab, sharing the bottom navigation with 课表 and 日程. */
+    /** Hosts the 「我的」 page as a full tab, sharing the bottom navigation with week and list. */
     public void setMinePage(View page) {
         if (minePage != null) removeView(minePage);
         minePage = page;
         if (page == null) return;
         page.setBackgroundColor(background);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-1, -1);
-        lp.bottomMargin = dp(62);
+        lp.bottomMargin = bottomHeight;
         addView(page, indexOfChild(bottom), lp);
         page.setVisibility(selectedTab == 2 ? VISIBLE : GONE);
     }
 
     public boolean isMine() { return selectedTab == 2; }
 
-    /** Horizontal swipe: -1 = previous tab, +1 = next tab (课表 → 日程 → 我的). */
+    /** Horizontal swipe: -1 = previous tab, +1 = next tab (week → list → mine). */
     public boolean canSwipeTab(int direction) {
         int target = selectedTab + direction;
         return target >= 0 && target <= 2;
@@ -498,17 +574,11 @@ public class PastelTimetableView extends FrameLayout {
     private void updateSegments() {
         weekSegment.setBackground(listMode ? null : round(coral, 10));
         listSegment.setBackground(listMode ? round(coral, 10) : null);
-        int selectedText = dark ? color("#282037") : Color.WHITE;
-        weekSegment.setTextColor(listMode ? coral : selectedText);
-        listSegment.setTextColor(listMode ? selectedText : coral);
-        weekSegment.setCompoundDrawablesWithIntrinsicBounds(new SmallIcon("calendar", listMode ? coral : selectedText), null, null, null);
-        listSegment.setCompoundDrawablesWithIntrinsicBounds(new SmallIcon("list", listMode ? selectedText : coral), null, null, null);
-        // Equal inner padding keeps both compact labels centered as a single icon/text group.
-        int inner = Math.max(dp(12), (getResources().getDisplayMetrics().widthPixels - dp(28)) / 4 - dp(35));
-        weekSegment.setPadding(inner, 0, inner, 0);
-        listSegment.setPadding(inner, 0, inner, 0);
-        weekSegment.setCompoundDrawablePadding(dp(5));
-        listSegment.setCompoundDrawablePadding(dp(5));
+        weekSegment.setTextColor(listMode ? muted : uiColors.onAccent);
+        listSegment.setTextColor(listMode ? uiColors.onAccent : muted);
+        // The actual segment width may be much narrower than the display in split-screen mode.
+        weekSegment.setPadding(dp(6), 0, dp(6), 0);
+        listSegment.setPadding(dp(6), 0, dp(6), 0);
         weekSegment.setSelected(!listMode);
         listSegment.setSelected(listMode);
         for (int i = 0; i < tabLabels.length; i++) if (tabLabels[i] != null) {
@@ -521,9 +591,9 @@ public class PastelTimetableView extends FrameLayout {
 
     private void rebuildList() {
         list.removeAllViews();
-        list.addView(addEventButton(), new LinearLayout.LayoutParams(-1, dp(44)));
-        if (entries.isEmpty() && events.isEmpty()) {
-            TextView empty = text(emptyMessage, 14, muted, false);
+        if (displayMode.showsEvents()) list.addView(addEventButton(), new LinearLayout.LayoutParams(-1, dp(44)));
+        if ((!displayMode.showsCourses() || entries.isEmpty()) && (!displayMode.showsEvents() || events.isEmpty())) {
+            TextView empty = text(visibleEmptyMessage(), 14, muted, false);
             empty.setPadding(dp(20), dp(32), dp(20), dp(32));
             empty.setGravity(Gravity.CENTER);
             empty.setBackground(round(surface, 18));
@@ -532,7 +602,7 @@ public class PastelTimetableView extends FrameLayout {
             list.addView(empty, ep);
             // The primary add-event button is already above the empty state. Never offer
             // a semester-wide course here while browsing a holiday or another term.
-            if (outsideSemester && !storageLocked) return;
+            if (!displayMode.showsCourses() || (outsideSemester && !storageLocked)) return;
             TextView add = text(storageLocked ? s(R.string.view_open_settings) : s(R.string.view_add_course), 13, coral, true);
             add.setGravity(Gravity.CENTER);
             add.setPadding(0, dp(16), 0, dp(16));
@@ -541,8 +611,9 @@ public class PastelTimetableView extends FrameLayout {
             return;
         }
         // Courses and personal events share one day-by-day agenda, ordered by start time.
-        List<Object> items = new ArrayList<>(entries);
-        items.addAll(events);
+        List<Object> items = new ArrayList<>();
+        if (displayMode.showsCourses()) items.addAll(entries);
+        if (displayMode.showsEvents()) items.addAll(events);
         Collections.sort(items, new Comparator<Object>() {
             @Override public int compare(Object a, Object b) {
                 int dayOrder = Integer.compare(rank(dayOf(a)), rank(dayOf(b)));
@@ -601,20 +672,20 @@ public class PastelTimetableView extends FrameLayout {
         add.setBackground(round(theme.tint, 14));
         add.setContentDescription(s(R.string.view_add_event));
         add.setOnClickListener(v -> {
-            if (storageLocked) Toast.makeText(getContext(), s(R.string.view_toast_storage), Toast.LENGTH_SHORT).show();
-            else if (actions != null) actions.onAddEvent();
+            // Course and event storage are independent; the host checks the event store.
+            if (displayMode.showsEvents() && actions != null) actions.onAddEvent();
         });
         return add;
     }
 
     private View eventCard(EventEntry event) {
         boolean past = System.currentTimeMillis() >= event.endMillis;
-        int textColor = past ? (dark ? color("#7F8AA3") : color("#8A93AA")) : ink;
+        int textColor = past ? (dark ? DarkUiPalette.HINT : color("#8A93AA")) : ink;
         LinearLayout card = row();
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(dp(12), dp(12), dp(15), dp(12));
-        GradientDrawable bg = round(past ? (dark ? color("#1A2030") : color("#ECEEF3")) : surface, 15);
-        bg.setStroke(dp(1), past ? line : PastelTimetableView.withAlpha(coral, 120));
+        GradientDrawable bg = round(past ? (dark ? DarkUiPalette.RECESSED : color("#ECEEF3")) : surface, 15);
+        bg.setStroke(dp(1), past ? (dark ? DarkUiPalette.SUBTLE_LINE : line) : PastelTimetableView.withAlpha(coral, dark ? 96 : 120));
         card.setBackground(bg);
         TextView badge = text(s(R.string.view_event_badge), 10, past ? textColor : coral, true);
         badge.setGravity(Gravity.CENTER);
@@ -638,7 +709,7 @@ public class PastelTimetableView extends FrameLayout {
                 DAYS[Math.max(0, Math.min(6, event.day))], nonempty(event.time, ""),
                 (where.isEmpty() ? "" : s(R.string.view_desc_suffix, event.location))
                         + (past ? s(R.string.view_desc_suffix, event.hasEnd ? s(R.string.view_event_ended) : s(R.string.view_event_due)) : "")));
-        card.setOnClickListener(v -> { if (actions != null) actions.onEvent(event.id); });
+        card.setOnClickListener(v -> { if (displayMode.showsEvents() && actions != null) actions.onEvent(event.id); });
         return card;
     }
 
@@ -689,16 +760,29 @@ public class PastelTimetableView extends FrameLayout {
         updateSegments();
     }
     private void addCourse(int day, int period) {
-        if (storageLocked) {
-            Toast.makeText(getContext(), s(R.string.view_toast_storage), Toast.LENGTH_SHORT).show();
-        } else if (outsideSemester) {
+        if (!displayMode.showsCourses()) return;
+        if (outsideSemester) {
+            if (!displayMode.showsEvents()) {
+                Toast.makeText(getContext(), s(R.string.display_mode_course_outside_hint), Toast.LENGTH_SHORT).show();
+                return;
+            }
             showAgenda();
-            if (actions != null) actions.onAddEvent();
+            addEventOnDay(day);
+        } else if (storageLocked) {
+            Toast.makeText(getContext(), s(R.string.view_toast_storage), Toast.LENGTH_SHORT).show();
         } else if (actions != null) actions.onAdd(day, period);
     }
 
-    private void openCourse(Entry entry) { if (actions != null) actions.onCourse(entry.id); }
+    private void addEventOnDay(int day) {
+        if (!displayMode.showsEvents() || actions == null) return;
+        if (dayDateMillis != null && day >= 0 && day < dayDateMillis.length)
+            actions.onAddEventOnDate(dayDateMillis[day]);
+        else actions.onAddEvent();
+    }
+
+    private void openCourse(Entry entry) { if (displayMode.showsCourses() && actions != null) actions.onCourse(entry.id); }
     private void editCourse(View source, Entry entry) {
+        if (!displayMode.showsCourses()) return;
         source.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
         if (storageLocked) {
             Toast.makeText(getContext(), s(R.string.view_toast_storage), Toast.LENGTH_SHORT).show();
@@ -709,11 +793,12 @@ public class PastelTimetableView extends FrameLayout {
         long now = android.os.SystemClock.uptimeMillis();
         if (now - lastHintAt < 2500) return;
         lastHintAt = now;
-        if (outsideSemester) {
+        if (outsideSemester && displayMode.showsEvents()) {
             showAgenda();
             scroll.post(() -> scroll.smoothScrollTo(0, 0));
         }
-        Toast.makeText(getContext(), outsideSemester ? s(R.string.view_toast_outside_term) : s(R.string.view_toast_long_press_add),
+        Toast.makeText(getContext(), outsideSemester ? s(displayMode.showsEvents() ? R.string.view_toast_outside_term
+                        : R.string.display_mode_course_outside_hint) : s(R.string.view_toast_long_press_add),
                 Toast.LENGTH_SHORT).show();
     }
     private String description(Entry e) {
@@ -735,13 +820,10 @@ public class PastelTimetableView extends FrameLayout {
 
     private Drawable courseBackground(Entry entry, int radius) {
         GradientDrawable base = round(courseColor(entry), radius);
+        if (dark && !isFinished(entry)) base.setStroke(dp(1), Color.argb(28, 255, 255, 255));
         if (!dark || !isFinished(entry)) return base;
-        GradientDrawable stripe = round(activeCourseColor(entry), 2);
-        android.graphics.drawable.LayerDrawable layers = new android.graphics.drawable.LayerDrawable(new Drawable[]{base, stripe});
-        layers.setLayerWidth(1, dp(3));
-        layers.setLayerGravity(1, Gravity.LEFT | Gravity.FILL_VERTICAL);
-        layers.setLayerInset(1, dp(2), dp(7), 0, dp(7));
-        return layers;
+        base.setStroke(dp(1), DarkUiPalette.tintedFinishedStroke(activeCourseColor(entry)));
+        return base;
     }
 
     private TextView finishedBadge(Entry entry, boolean compact) {
@@ -760,7 +842,10 @@ public class PastelTimetableView extends FrameLayout {
     }
 
     private int courseSecondaryInk(Entry entry) {
-        return dark && isFinished(entry) ? CoursePalette.finishedSecondaryInk(courseColor(entry), dark) : courseInk(entry);
+        if (!dark || !isFinished(entry)) return courseInk(entry);
+        int bg = courseColor(entry);
+        int baseSecondary = CoursePalette.finishedSecondaryInk(courseColor(entry), dark);
+        return DarkUiPalette.tintedFinishedSecondaryInk(activeCourseColor(entry), bg, baseSecondary);
     }
 
     private int activeCourseColor(Entry entry) {
@@ -772,11 +857,16 @@ public class PastelTimetableView extends FrameLayout {
     private int courseColor(Entry entry) {
         int surfaceColor = activeCourseColor(entry);
         if (!isFinished(entry)) return surfaceColor;
-        return CoursePalette.finishedSurface(surfaceColor, dark);
+        if (dark) return DarkUiPalette.tintedFinishedFill(surfaceColor);
+        return CoursePalette.finishedSurface(surfaceColor, false);
     }
     private int courseInk(Entry entry) {
         // Completion styling has priority over the selected palette, including custom muted shades.
-        if (isFinished(entry)) return CoursePalette.finishedInk(courseColor(entry), dark);
+        if (isFinished(entry)) {
+            int bg = courseColor(entry);
+            int baseInk = CoursePalette.finishedInk(bg, dark);
+            return dark ? DarkUiPalette.tintedFinishedInk(activeCourseColor(entry), bg, baseInk) : baseInk;
+        }
         return CoursePalette.activeInk(courseColor(entry), dark);
     }
     /** Use the displayed dates, so past/future previews follow the same rule as this week. */
@@ -842,10 +932,21 @@ public class PastelTimetableView extends FrameLayout {
     private GradientDrawable round(int c, float radius) {
         GradientDrawable d = new GradientDrawable(); d.setColor(c); d.setCornerRadius(dp(radius)); return d;
     }
+    private Drawable bottomBarBackground() {
+        GradientDrawable fill = new GradientDrawable();
+        fill.setColor(surface);
+        if (!dark) return fill;
+        GradientDrawable topLine = new GradientDrawable();
+        topLine.setColor(line);
+        android.graphics.drawable.LayerDrawable layers = new android.graphics.drawable.LayerDrawable(new Drawable[]{fill, topLine});
+        layers.setLayerHeight(1, Math.max(1, dp(0.8f)));
+        layers.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
+        return layers;
+    }
     private View iconButton(String kind, String label, Runnable action) {
         IconView v = new IconView(getContext(), kind, ink);
         v.setPadding(dp(11), dp(11), dp(11), dp(11));
-        GradientDrawable buttonBackground = round(theme.tint, 16);
+        GradientDrawable buttonBackground = round(uiColors.inset, 16);
         v.setBackground(new android.graphics.drawable.InsetDrawable(buttonBackground, dp(3), dp(3), dp(3), dp(3)));
         v.setContentDescription(label); v.setOnClickListener(w -> action.run()); return v;
     }
@@ -881,6 +982,108 @@ public class PastelTimetableView extends FrameLayout {
         }
     }
 
+    /** Keeps short timeline blocks legible using the actual font's available line budget. */
+    private final class TimelineCard extends LinearLayout {
+        final TextView time, title;
+        private final boolean grouped;
+        private final float badgeTextSize;
+        private final Paint badgeMetrics = new Paint();
+        TimelineCard(String clock, String label, boolean past, boolean grouped) {
+            super(PastelTimetableView.this.getContext());
+            this.grouped = grouped;
+            setOrientation(VERTICAL);
+            int horizontalPadding = dp(grouped ? 2 : 3);
+            setPadding(horizontalPadding, dp(3), horizontalPadding, dp(3));
+            GradientDrawable background = round(past ? surface : uiColors.inset, 7);
+            setBackground(background);
+            time = text(clock, 8, muted, true);
+            time.setSingleLine(true);
+            time.setEllipsize(TextUtils.TruncateAt.END);
+            time.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+            addView(time, new LinearLayout.LayoutParams(-1, -2));
+            title = text(label, 9, past ? muted : ink, true);
+            title.setGravity(Gravity.TOP | Gravity.START);
+            title.setEllipsize(TextUtils.TruncateAt.END);
+            title.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);
+            title.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+            badgeTextSize = title.getTextSize();
+            LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(grouped ? -2 : -1, -2);
+            if (grouped) {
+                title.setTag("agenda:group_count");
+                title.setGravity(Gravity.CENTER);
+                title.setPadding(dp(1), dp(1), dp(1), dp(1));
+                title.setBackground(round(surface, 5));
+                title.setSingleLine(true);
+                titleParams.gravity = Gravity.END;
+            }
+            addView(title, titleParams);
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
+        }
+        @Override protected void onMeasure(int widthSpec, int heightSpec) {
+            if (grouped) {
+                String count = title.getText().toString();
+                Paint metrics = badgeMetrics;
+                metrics.set(title.getPaint());
+                float minimumSize = 8f * getResources().getDisplayMetrics().density;
+                metrics.setTextSize(minimumSize);
+                // Window decoration and the selected font both affect the real remaining width.
+                // Preserve readable glyphs by giving up horizontal padding before reducing text.
+                int cardWidth = Math.max(1, MeasureSpec.getSize(widthSpec));
+                int requiredWidth = (int) Math.ceil(metrics.measureText(count)) + 1;
+                int paddingBudget = Math.max(0, (cardWidth - requiredWidth) / 2);
+                int badgePadding = Math.min(dp(1), paddingBudget);
+                int cardPadding = Math.min(dp(2), paddingBudget - badgePadding);
+                setPadding(cardPadding, getPaddingTop(), cardPadding, getPaddingBottom());
+                title.setPadding(badgePadding, title.getPaddingTop(), badgePadding, title.getPaddingBottom());
+                int textWidth = Math.max(1, cardWidth - 2 * (cardPadding + badgePadding) - 1);
+                float lower = minimumSize, upper = Math.max(minimumSize, badgeTextSize);
+                metrics.setTextSize(upper);
+                if (metrics.measureText(count) <= textWidth) lower = upper;
+                else {
+                    for (int i = 0; i < 10; i++) {
+                        float candidate = (lower + upper) / 2f;
+                        metrics.setTextSize(candidate);
+                        if (metrics.measureText(count) <= textWidth) lower = candidate;
+                        else upper = candidate;
+                    }
+                }
+                title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, lower);
+            }
+            int available = Math.max(0, MeasureSpec.getSize(heightSpec) - getPaddingTop() - getPaddingBottom());
+            int titleLine = Math.max(1, title.getLineHeight() + title.getCompoundPaddingTop() + title.getCompoundPaddingBottom());
+            int timeLine = Math.max(1, time.getLineHeight());
+            boolean showTime = available >= timeLine + titleLine;
+            time.setVisibility(showTime ? VISIBLE : GONE);
+            int lines = grouped ? 1 : Math.max(1, Math.min(8, (available - (showTime ? timeLine : 0)) / titleLine));
+            if (title.getMaxLines() != lines) title.setMaxLines(lines);
+            super.onMeasure(widthSpec, heightSpec);
+            while (title.getMaxLines() > 1 && clipsTimelineText(available)) {
+                title.setMaxLines(title.getMaxLines() - 1);
+                super.onMeasure(widthSpec, heightSpec);
+            }
+            // CJK fallback fonts can be taller than the primary typeface's line-height estimate.
+            if (time.getVisibility() == VISIBLE && clipsTimelineText(available)) {
+                time.setVisibility(GONE);
+                super.onMeasure(widthSpec, heightSpec);
+            }
+        }
+        private boolean clipsTimelineText(int available) {
+            int used = 0;
+            for (int i = 0; i < getChildCount(); i++) {
+                TextView label = (TextView) getChildAt(i);
+                if (label.getVisibility() == GONE) continue;
+                used += label.getMeasuredHeight();
+                android.text.Layout layout = label.getLayout();
+                if (layout != null && layout.getLineCount() > 0) {
+                    int lines = Math.min(label.getMaxLines(), layout.getLineCount());
+                    if (layout.getLineBottom(lines - 1) > label.getMeasuredHeight()
+                            - label.getCompoundPaddingTop() - label.getCompoundPaddingBottom()) return true;
+                }
+            }
+            return used > available;
+        }
+    }
+
     private final class WeekGrid extends FrameLayout {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF clip = new RectF();
@@ -891,29 +1094,50 @@ public class PastelTimetableView extends FrameLayout {
         private final boolean[] expandedEvents = new boolean[7];
         private final int eventCardHeight = dp(58 * textScale);
         private final int eventControlHeight = dp(44 * textScale);
+        private final int agendaHourHeight = dp(72 * textScale);
+        private AgendaTimelineLayout.Layout<EventEntry> agendaLayout = AgendaTimelineLayout.layout(Collections.emptyList());
+        private int agendaVisualEnd;
         private int eventStripHeight;
         private int courseTop() { return heading + eventStripHeight; }
+        private int agendaTop() { return heading + eventControlHeight + dp(18 * textScale); }
+        private int agendaY(int minute) {
+            return agendaTop() + Math.round((minute - agendaLayout.startMinute) * agendaHourHeight / 60f);
+        }
         void collapseEvents() { java.util.Arrays.fill(expandedEvents, false); }
         void updateHeight() {
+            if (displayMode == DisplayMode.AGENDA) {
+                agendaLayout = AgendaTimelineLayout.layout(events);
+                agendaVisualEnd = agendaLayout.endMinute;
+                for (AgendaTimelineLayout.Group<EventEntry> group : agendaLayout.groups)
+                    agendaVisualEnd = Math.max(agendaVisualEnd, group.endMinute);
+                eventStripHeight = 0;
+                int height = agendaLayout.groups.isEmpty()
+                        ? heading + eventControlHeight + dp(8 + 72 * textScale)
+                        : agendaY(agendaVisualEnd) + dp(14 * textScale);
+                setGridHeight(height);
+                return;
+            }
             int rowsHeight = 0;
-            for (int day = 0; day < 7; day++) {
+            for (int day = 0; displayMode.showsEvents() && day < 7; day++) {
                 int count = WeekEventLayout.forDay(events, day).size();
                 int height = WeekEventLayout.visibleCount(count, expandedEvents[day]) * eventCardHeight;
                 if (count > WeekEventLayout.PREVIEW_COUNT) height += eventControlHeight;
                 rowsHeight = Math.max(rowsHeight, height);
             }
             eventStripHeight = rowsHeight == 0 ? 0 : rowsHeight + dp(4);
-            if (getLayoutParams() != null) {
-                int height = courseTop() + Math.max(1, times.size()) * rowHeight;
-                if (getLayoutParams().height != height) {
-                    getLayoutParams().height = height;
-                    requestLayout();
-                }
+            setGridHeight(courseTop() + Math.max(1, times.size()) * rowHeight);
+        }
+        private void setGridHeight(int height) {
+            if (getLayoutParams() != null && getLayoutParams().height != height) {
+                getLayoutParams().height = height;
+                requestLayout();
             }
         }
         WeekGrid(Context context) {
             super(context);
-            setBackground(round(surface, 18));
+            GradientDrawable gridBg = round(surface, 18);
+            if (dark) gridBg.setStroke(dp(1), line);
+            setBackground(gridBg);
             setClipToOutline(true);
             setWillNotDraw(false);
         }
@@ -927,11 +1151,22 @@ public class PastelTimetableView extends FrameLayout {
             if (getWidth() == 0) return;
             builtWidth = getWidth();
             removeAllViews();
-            left = dp(35);
+            TextView agendaRuler = text("24:00", 8, muted, false);
+            left = displayMode == DisplayMode.AGENDA
+                    ? Math.max(dp(35), (float) Math.ceil(agendaRuler.getPaint().measureText("24:00")) + dp(8))
+                    : dp(35);
             columnWidth = (getWidth() - left) / 7f;
-            TextView periodHeading = text(s(R.string.view_period_heading), 9, muted, false);
-            periodHeading.setGravity(Gravity.CENTER);
-            place(periodHeading, 0, 0, Math.round(left), heading);
+            if (displayMode.showsCourses()) {
+                TextView periodHeading = text(s(R.string.view_period_heading), 9, muted, false);
+                periodHeading.setGravity(Gravity.CENTER);
+                place(periodHeading, 0, 0, Math.round(left), heading);
+            } else {
+                TextView timeHeading = text(s(R.string.agenda_timeline_time_heading), 9, muted, false);
+                timeHeading.setGravity(Gravity.CENTER);
+                timeHeading.setMaxLines(2);
+                timeHeading.setEllipsize(TextUtils.TruncateAt.END);
+                place(timeHeading, 0, 0, Math.round(left), heading);
+            }
             for (int day = 0; day < 7; day++) {
                 String dayLabel = DAYS[day];
                 if (dayDateMillis != null && dayDateMillis[day] > 0) {
@@ -945,6 +1180,12 @@ public class PastelTimetableView extends FrameLayout {
                 label.setEllipsize(TextUtils.TruncateAt.END);
                 place(label, Math.round(left + day * columnWidth), 0,
                         Math.round(left + (day + 1) * columnWidth) - Math.round(left + day * columnWidth), heading);
+            }
+            if (displayMode == DisplayMode.AGENDA) {
+                buildEventAddRow();
+                buildAgendaTimeline();
+                invalidate();
+                return;
             }
             buildEventStrip();
             for (int p = 0; p < times.size(); p++) {
@@ -963,7 +1204,8 @@ public class PastelTimetableView extends FrameLayout {
                     final int d = day, period = p + 1;
                     View empty = new View(getContext());
                     empty.setContentDescription(outsideSemester
-                            ? s(R.string.view_cell_outside_term_desc, DAYS[day])
+                            ? s(displayMode.showsEvents() ? R.string.view_cell_outside_term_desc
+                            : R.string.display_mode_course_outside_cell, DAYS[day])
                             : s(R.string.view_cell_desc, DAYS[day], period));
                     empty.setOnClickListener(v -> hintLongPress());
                     empty.setOnLongClickListener(v -> {
@@ -983,11 +1225,15 @@ public class PastelTimetableView extends FrameLayout {
                             Math.round(left + (day + 1) * columnWidth) - x, rowHeight);
                 }
             }
-            for (Entry entry : entries) {
-                if (entry.day < 0 || entry.day > 6 || entry.start < 1 || entry.start > times.size() || entry.end < entry.start) continue;
+            for (CourseOverlapLayout.Group<Entry> group : CourseOverlapLayout.group(entries, times.size())) {
+                if (group.items.size() > 1) {
+                    buildOverlapCard(group);
+                    continue;
+                }
+                Entry entry = group.items.get(0);
                 int end = Math.min(entry.end, times.size());
                 CourseColumn card = new CourseColumn(); card.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
-                card.setPadding(dp(dark && isFinished(entry) ? 6 : 2), dp(5), dp(2), dp(3));
+                card.setPadding(dp(2), dp(5), dp(2), dp(3));
                 card.setBackground(courseBackground(entry, 10));
                 boolean finished = isFinished(entry);
                 boolean compactFinished = finished && end == entry.start;
@@ -1043,12 +1289,40 @@ public class PastelTimetableView extends FrameLayout {
             }
             invalidate();
         }
+        private void buildOverlapCard(CourseOverlapLayout.Group<Entry> group) {
+            TextView card = text(getResources().getQuantityString(R.plurals.overlap_course_count,
+                    group.items.size(), group.items.size()) + "\n" + s(R.string.overlap_pick_course), 10.5f, ink, true);
+            card.setGravity(Gravity.CENTER);
+            card.setPadding(dp(3), dp(3), dp(3), dp(3));
+            card.setMaxLines(4);
+            card.setEllipsize(TextUtils.TruncateAt.END);
+            GradientDrawable bg = round(theme.tint, 10);
+            bg.setStroke(dp(1), coral);
+            card.setBackground(bg);
+            long[] ids = new long[group.items.size()];
+            StringBuilder names = new StringBuilder();
+            for (int i = 0; i < group.items.size(); i++) {
+                ids[i] = group.items.get(i).id;
+                if (i > 0) names.append("、");
+                names.append(nonempty(group.items.get(i).name, s(R.string.view_untitled_course)));
+            }
+            card.setContentDescription(s(R.string.overlap_courses_description, DAYS[group.day],
+                    group.start, group.end, names.toString()));
+            card.setOnClickListener(v -> { if (displayMode.showsCourses() && actions != null) actions.onCourses(ids.clone()); });
+            card.setOnLongClickListener(v -> { card.performClick(); return true; });
+            int x = Math.round(left + group.day * columnWidth) + dp(2);
+            place(card, x, courseTop() + (group.start - 1) * rowHeight + dp(2),
+                    Math.max(1, Math.round(left + (group.day + 1) * columnWidth) - x - dp(2)),
+                    (group.end - group.start + 1) * rowHeight - dp(4));
+        }
         private void buildEventStrip() {
-            if (eventStripHeight == 0) return;
-            TextView label = text(s(R.string.week_events_label), 8, muted, true);
-            label.setGravity(Gravity.CENTER);
-            label.setMaxLines(3);
-            place(label, 0, heading, Math.round(left), Math.min(eventStripHeight, eventCardHeight));
+            if (!displayMode.showsEvents() || eventStripHeight == 0) return;
+            if (displayMode.showsCourses()) {
+                TextView label = text(s(R.string.week_events_label), 8, muted, true);
+                label.setGravity(Gravity.CENTER);
+                label.setMaxLines(3);
+                place(label, 0, heading, Math.round(left), Math.min(eventStripHeight, eventCardHeight));
+            }
             long now = System.currentTimeMillis();
             for (int day = 0; day < 7; day++) {
                 final int selectedDay = day;
@@ -1077,7 +1351,7 @@ public class PastelTimetableView extends FrameLayout {
                             nonempty(event.time, clock), nonempty(event.title, s(R.string.view_untitled_event))));
                     time.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
                     title.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-                    card.setOnClickListener(v -> { if (actions != null) actions.onEvent(event.id); });
+                    card.setOnClickListener(v -> { if (displayMode.showsEvents() && actions != null) actions.onEvent(event.id); });
                     place(card, x, heading + index * eventCardHeight + dp(2), width, eventCardHeight - dp(4));
                 }
                 if (dayEvents.size() > WeekEventLayout.PREVIEW_COUNT) {
@@ -1097,19 +1371,119 @@ public class PastelTimetableView extends FrameLayout {
                 }
             }
         }
+        private void buildEventAddRow() {
+            for (int day = 0; day < 7; day++) {
+                final int selectedDay = day;
+                IconView add = new IconView(getContext(), "plus", muted);
+                add.maxViewportSize = dp(24);
+                add.setTag("agenda:add:" + day);
+                add.setBackground(round(uiColors.inset, 9));
+                String date = dayDates != null && day < dayDates.length && dayDates[day] != null
+                        ? " " + dayDates[day] : "";
+                add.setContentDescription(s(R.string.display_mode_event_add_on_day, DAYS[day] + date));
+                add.setOnClickListener(v -> addEventOnDay(selectedDay));
+                int x = Math.round(left + day * columnWidth) + dp(2);
+                place(add, x, heading + dp(4),
+                        Math.max(1, Math.round(left + (day + 1) * columnWidth) - x - dp(2)), eventControlHeight);
+            }
+            if (agendaLayout.groups.isEmpty()) {
+                TextView empty = text(s(R.string.display_mode_agenda_empty), 13, muted, false);
+                empty.setGravity(Gravity.CENTER);
+                empty.setPadding(dp(14), dp(8), dp(14), dp(8));
+                place(empty, 0, heading + eventControlHeight + dp(8), getWidth(), dp(72 * textScale));
+            }
+        }
+        private void buildAgendaTimeline() {
+            if (agendaLayout.groups.isEmpty()) return;
+            int labelHeight = dp(16 * textScale);
+            for (int minute = agendaLayout.startMinute; minute <= agendaLayout.endMinute; minute += 60) {
+                TextView clock = text(agendaClock(minute), 8, muted, false);
+                clock.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+                clock.setSingleLine(true);
+                clock.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+                place(clock, 0, agendaY(minute) - labelHeight / 2, Math.round(left) - dp(5), labelHeight);
+            }
+            long now = System.currentTimeMillis();
+            for (AgendaTimelineLayout.Group<EventEntry> group : agendaLayout.groups) {
+                float laneWidth = columnWidth / group.laneCount - dp(4);
+                if (group.laneCount > 1 && laneWidth < dp(32)) {
+                    buildAgendaGroup(group, now);
+                    continue;
+                }
+                float dayLeft = left + group.day * columnWidth;
+                for (AgendaTimelineLayout.Placement<EventEntry> placement : group.placements) {
+                    EventEntry event = placement.item;
+                    TimelineCard card = new TimelineCard(agendaClock(event.startMinutes),
+                            nonempty(event.title, s(R.string.view_untitled_event)), now >= event.endMillis, false);
+                    card.setContentDescription(s(R.string.week_event_description, DAYS[group.day],
+                            agendaEventTime(event), nonempty(event.title, s(R.string.view_untitled_event))));
+                    card.setOnClickListener(v -> { if (displayMode.showsEvents() && actions != null) actions.onEvent(event.id); });
+                    int x = Math.round(dayLeft + placement.lane * columnWidth / group.laneCount) + dp(2);
+                    int right = Math.round(dayLeft + (placement.lane + 1) * columnWidth / group.laneCount) - dp(2);
+                    place(card, x, agendaY(placement.startMinute) + dp(2), Math.max(1, right - x),
+                            Math.max(1, agendaY(placement.endMinute) - agendaY(placement.startMinute) - dp(4)));
+                }
+            }
+        }
+        private void buildAgendaGroup(AgendaTimelineLayout.Group<EventEntry> group, long now) {
+            long[] ids = new long[group.placements.size()];
+            StringBuilder descriptions = new StringBuilder();
+            boolean allPast = true;
+            for (int i = 0; i < group.placements.size(); i++) {
+                EventEntry event = group.placements.get(i).item;
+                ids[i] = event.id;
+                allPast &= now >= event.endMillis;
+                if (i > 0) descriptions.append("\n");
+                descriptions.append(agendaEventTime(event)).append(" ")
+                        .append(nonempty(event.title, s(R.string.view_untitled_event)));
+            }
+            String count = ids.length > 99 ? s(R.string.ui_refinement_group_count_many)
+                    : String.format(Locale.getDefault(), "%d", ids.length);
+            TimelineCard card = new TimelineCard(agendaClock(group.startMinute), count, allPast, true);
+            card.setTag("agenda:group:" + group.day + ":" + group.startMinute);
+            card.title.setContentDescription(getResources().getQuantityString(R.plurals.agenda_timeline_event_count,
+                    ids.length, ids.length));
+            card.setContentDescription(s(R.string.agenda_timeline_group_description, DAYS[group.day], ids.length, descriptions));
+            card.setOnClickListener(v -> { if (displayMode.showsEvents() && actions != null) actions.onEvents(ids.clone()); });
+            int x = Math.round(left + group.day * columnWidth) + dp(2);
+            int right = Math.round(left + (group.day + 1) * columnWidth) - dp(2);
+            place(card, x, agendaY(group.startMinute) + dp(2), Math.max(1, right - x),
+                    Math.max(1, agendaY(group.endMinute) - agendaY(group.startMinute) - dp(4)));
+        }
+        private String agendaEventTime(EventEntry event) {
+            String fallback = agendaClock(event.startMinutes);
+            if (event.endMinutes > event.startMinutes && event.endMinutes <= 1439)
+                fallback += "–" + agendaClock(event.endMinutes);
+            return nonempty(event.time, fallback);
+        }
+        private String agendaClock(int minute) {
+            return String.format(Locale.getDefault(), "%02d:%02d", minute / 60, minute % 60);
+        }
         private void place(View view, int x, int y, int width, int height) {
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, height); lp.leftMargin = x; lp.topMargin = y; addView(view, lp);
         }
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             paint.setColor(line); paint.setStrokeWidth(dp(1));
+            if (displayMode == DisplayMode.AGENDA) {
+                canvas.drawLine(0, heading, getWidth(), heading, paint);
+                if (agendaLayout.groups.isEmpty()) return;
+                for (int day = 0; day < 7; day++) canvas.drawLine(left + day * columnWidth, agendaTop(),
+                        left + day * columnWidth, agendaY(agendaVisualEnd), paint);
+                for (int minute = agendaLayout.startMinute; minute <= agendaLayout.endMinute; minute += 60)
+                    canvas.drawLine(left, agendaY(minute), getWidth(), agendaY(minute), paint);
+                return;
+            }
             if (eventStripHeight > 0) canvas.drawLine(0, heading, getWidth(), heading, paint);
             for (int day = 0; day < 7; day++) canvas.drawLine(left + day * columnWidth, heading, left + day * columnWidth, getHeight(), paint);
-            for (int p = 0; p <= times.size(); p++) canvas.drawLine(0, courseTop() + p * rowHeight, getWidth(), courseTop() + p * rowHeight, paint);
+            for (int p = 0; p <= times.size(); p++) {
+                paint.setColor(dark && p > 0 && p < times.size() ? DarkUiPalette.SUBTLE_LINE : line);
+                canvas.drawLine(0, courseTop() + p * rowHeight, getWidth(), courseTop() + p * rowHeight, paint);
+            }
         }
         @Override protected void dispatchDraw(Canvas canvas) {
             super.dispatchDraw(canvas);
-            if (!actualWeek || preview || storageLocked) return;
+            if (!displayMode.showsCourses() || !actualWeek || preview || storageLocked) return;
             Calendar now = Calendar.getInstance();
             float minute = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE) + now.get(Calendar.SECOND) / 60f;
             float y = -1;
@@ -1146,7 +1520,7 @@ public class PastelTimetableView extends FrameLayout {
                 float labelTop = Math.max(heading, Math.min(getHeight() - labelHeight, y - labelHeight / 2));
                 float radius = labelHeight / 2;
                 canvas.drawRoundRect(new RectF(0, labelTop, w, labelTop + labelHeight), radius, radius, paint);
-                paint.setColor(Color.WHITE);
+                paint.setColor(DarkUiPalette.chipInk(coral, dark));
                 canvas.drawText(clock, paddingX, labelTop + paddingY - metrics.top, paint);
                 canvas.restoreToCount(save);
             }
@@ -1186,6 +1560,7 @@ public class PastelTimetableView extends FrameLayout {
     private final class IconView extends View {
         final String kind;
         int tint;
+        float maxViewportSize = Float.POSITIVE_INFINITY;
         final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         final Path path = new Path();
         final RectF gearRoot = new RectF();
@@ -1195,13 +1570,16 @@ public class PastelTimetableView extends FrameLayout {
             int save = canvas.save();
             float width = getWidth() - getPaddingLeft() - getPaddingRight();
             float height = getHeight() - getPaddingTop() - getPaddingBottom();
-            float scale = Math.min(width, height) / 24f;
+            float scale = Math.min(Math.min(width, height), maxViewportSize) / 24f;
             canvas.translate(getPaddingLeft() + (width - scale * 24) / 2, getPaddingTop() + (height - scale * 24) / 2);
             canvas.scale(scale, scale);
             p.setColor(tint); p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(1.65f);
             p.setStrokeJoin(Paint.Join.ROUND); p.setStrokeCap(Paint.Cap.ROUND);
             path.reset();
             switch (kind) {
+                case "plus":
+                    canvas.drawLine(4, 12, 20, 12, p);
+                    canvas.drawLine(12, 4, 12, 20, p); break;
                 case "clock":
                     canvas.drawCircle(12, 12, 9, p);
                     path.moveTo(12, 6); path.lineTo(12, 12); path.lineTo(16, 14); canvas.drawPath(path, p); break;

@@ -1,0 +1,10 @@
+// Opt-in isolated UI regression runner. Keep the real font assets for layout checks.
+gradle.beforeProject { project ->
+    project.pluginManager.withPlugin('com.android.application') {
+        project.androidComponents.finalizeDsl { android ->
+            android.defaultConfig.applicationId = 'com.weekweeks.app.audit'
+            android.defaultConfig.testInstrumentationRunner = 'com.weekweeks.app.UiRefinementDeviceTest'
+            android.buildTypes.debug.buildConfigField 'boolean', 'ENABLE_TEST_COURSE', 'false'
+        }
+    }
+}

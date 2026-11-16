@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="display_mode_section">Display content</string>
+    <string name="display_mode_title">Mode selection</string>
+    <string name="display_mode_timetable">Timetable mode</string>
+    <string name="display_mode_agenda">Agenda mode</string>
+    <string name="display_mode_combined">Combined mode</string>
+    <string name="display_mode_save_failed">Could not save the mode. Please try again.</string>
+</resources>

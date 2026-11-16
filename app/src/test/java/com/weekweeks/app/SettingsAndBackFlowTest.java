@@ -40,7 +40,8 @@ public class SettingsAndBackFlowTest {
         assertTrue(settings.contains("Type.systemBars()"));
         assertTrue(settings.contains("Type.displayCutout()"));
         assertFalse(settings.contains("getDisplayMetrics().widthPixels"));
-        assertTrue(settings.indexOf("glassPanel.addView(titleRow)") < settings.indexOf("new ScrollView(this)"));
-        assertTrue(settings.contains("ViewGroup.LayoutParams.WRAP_CONTENT,\n                1f"));
+        int titleAttachment = settings.indexOf("settingsPanel.addView(titleRow)");
+        assertTrue(titleAttachment >= 0 && titleAttachment < settings.indexOf("new ScrollView(this)"));
+        assertTrue(settings.contains("settingsPanel.addView(scroller, new LinearLayout.LayoutParams(-1, -2, 1f))"));
     }
 }

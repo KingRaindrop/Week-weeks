@@ -41,7 +41,6 @@
     <item quantity="one">%1$s%2$s · %3$d course</item>
     <item quantity="other">%1$s%2$s · %3$d courses</item>
   </plurals>
-  <string name="main_accent_summary">Choose the main tone for the whole app</string>
   <string name="main_accent_title">Interface tone</string>
   <string name="main_add_course">Add course</string>
   <string name="main_add_course_cta">＋ Add course</string>
@@ -57,7 +56,6 @@
   <string name="main_calendar_message">Total weeks are calculated from the term start and term end.</string>
   <string name="main_calendar_save_failed">Couldn\'t save the academic calendar. Check device storage.</string>
   <string name="main_calendar_settings">Academic calendar</string>
-  <string name="main_calendar_settings_summary">Set term start and term end</string>
   <string name="main_changes_saved">Changes saved</string>
   <string name="main_choose_week">Choose week</string>
   <string name="main_class_over">Finished</string>
@@ -92,6 +90,7 @@
   <string name="main_edit_course">Edit course</string>
   <string name="main_end_after_start">End time must be after start time</string>
   <string name="main_end_before_start">Term end can\'t be before term start</string>
+  <string name="main_calendar_too_long">Maximum number of weeks per term: %1$d. Adjust the start or end date.</string>
   <string name="main_enter_course_name">Enter a course name</string>
   <string name="main_event">Event</string>
   <string name="main_event_added">Event added</string>
@@ -115,8 +114,7 @@
   <string name="main_hint_room">Room / location</string>
   <string name="main_hint_weeks" tools:ignore="TypographyDashes">e.g. 1-6周,9-17周,1-16周单周</string>
   <string name="main_import_error">Import error: %1$s</string>
-  <string name="main_import_pdf">Import PDF timetable</string>
-  <string name="main_import_pdf_summary">Read courses, weeks and rooms from a file</string>
+  <string name="main_import_pdf">Import timetable file</string>
   <string name="main_import_result_imported">Imported %1$d</string>
   <string name="main_import_result_skipped">, skipped %1$d</string>
   <string name="main_import_result_title">Recognized courses</string>
@@ -155,17 +153,16 @@
   <string name="main_outside_term">Outside the term</string>
   <string name="main_outside_term_message">Courses follow the teaching weeks of the academic calendar and won\'t appear on this date. Add a personal event for one-off plans. If you edit the term timetable, you\'ll jump to a teaching week with classes after saving.</string>
   <string name="main_outside_term_title">This date is outside the term</string>
-  <string name="main_parsing_pdf">Reading PDF timetable…</string>
+  <string name="main_parsing_pdf">Reading timetable file…</string>
   <string name="main_paste_import">Paste timetable text</string>
-  <string name="main_paste_import_summary">If the PDF can\'t be read, paste text in the sample format</string>
   <string name="main_pasted_text_source">the pasted text</string>
   <string name="main_pastel_msg_default">See the event list for courses and personal plans</string>
   <string name="main_pastel_msg_outside">Outside the term · View and add personal events</string>
   <string name="main_pastel_msg_preview">Viewing another week; edits change the real timetable</string>
-  <string name="main_pdf_import_failed">PDF import failed: %1$s</string>
-  <string name="main_pdf_permission_lost">PDF access expired. Choose the file again.</string>
-  <string name="main_pdf_too_large">PDF is over 5 MB; import refused</string>
-  <string name="main_pdf_unreadable">Can\'t read the PDF file</string>
+  <string name="main_pdf_import_failed">File import failed: %1$s</string>
+  <string name="main_pdf_permission_lost">File access expired. Choose the file again.</string>
+  <string name="main_pdf_too_large">Timetable file is over 5 MB; import refused</string>
+  <string name="main_pdf_unreadable">Can\'t read the timetable file</string>
   <string name="main_period_badge_label">Per.</string>
   <string name="main_period_delete_blocked">This or a later period has courses, and deleting it would shift their times. Only unused periods at the end can be deleted.</string>
   <string name="main_period_format_invalid" tools:ignore="PluralsCandidate">Period %1$d has an invalid format</string>
@@ -175,7 +172,6 @@
   <string name="main_period_save_failed">Couldn\'t save periods. Check device storage.</string>
   <string name="main_period_saved">Periods saved</string>
   <string name="main_period_settings">Period times</string>
-  <string name="main_period_settings_summary">Set times for periods 1 to N</string>
   <string name="main_period_time_invalid" tools:ignore="PluralsCandidate">Period %1$d has invalid times</string>
   <string name="main_period_with_time">Period %1$d · %2$s</string>
   <string name="main_periods_order">Periods must run from earliest to latest without overlapping</string>
@@ -189,7 +185,6 @@
   <string name="main_preview_courses">[Preview]</string>
   <string name="main_preview_days">[By day]</string>
   <string name="main_preview_item">"%1$d. %2$s\n   %3$s Periods %4$d–%5$d %6$s\n"</string>
-  <string name="main_preview_more" tools:ignore="PluralsCandidate">… and %1$d more</string>
   <string name="main_preview_parsed">Courses parsed: %1$d</string>
   <string name="main_preview_per_day">"%1$s: %2$d  "</string>
   <string name="main_preview_per_period">"P%1$d: %2$d×  "</string>
@@ -197,7 +192,6 @@
   <string name="main_preview_stats">[Summary]</string>
   <string name="main_randomize_button">Randomize</string>
   <string name="main_randomize_colors">Random colors</string>
-  <string name="main_randomize_colors_summary">Bright presets first; same-name courses share a color</string>
   <string formatted="false" name="main_randomize_message">Reassigns colors for every course in the current timetable, replacing manual picks. Courses with the same name share a color. 12 curated colors are used without repeats per round and cycle after 12 courses; manual picking still offers 42 colors. Finished courses keep their color in light mode, faded to 30% background opacity with clear text; dark mode applies a light fade. Course times and other details don\'t change.</string>
   <string name="main_reminders">Reminders</string>
   <string name="main_reminders_off_desc">%1$s, reminders off, tap to turn on</string>
@@ -220,7 +214,6 @@
   <string name="main_shake_stop_desc">%1$s, double-tap to stop shaking</string>
   <string name="main_shake_stopped">Stopped shaking for this class</string>
   <string name="main_show_teacher">Show teacher names</string>
-  <string name="main_show_teacher_summary">Shown in week view and lists; always in details</string>
   <string name="main_skip_exists">%1$s: already exists</string>
   <string name="main_skip_limit">%1$s: limit reached</string>
   <string name="main_skip_reasons">Skipped because:\n%1$s</string>
@@ -240,6 +233,10 @@
   <string name="main_storage_locked_warning">⚠️ Encrypted timetable can\'t be read\n\nSaving is paused to protect your data.\nCheck the system keystore or clear app data to start over.</string>
   <string name="main_switch_to_dark">Switch to dark mode</string>
   <string name="main_switch_to_light">Switch to light mode</string>
+  <string name="main_theme_mode_title">Appearance mode</string>
+  <string name="main_theme_follow_system">Follow system</string>
+  <string name="main_theme_light">Light</string>
+  <string name="main_theme_dark">Dark</string>
   <string name="main_tap_to_select_suffix">, tap to select</string>
   <string name="main_temp_weeks_message">Starts in the current week (%1$d) and runs for N weeks.</string>
   <string name="main_temp_weeks_outside">Not in a teaching week; temporary weeks can\'t be set</string>
@@ -252,7 +249,6 @@
   <string name="main_test_reminder">Test class reminder</string>
   <string name="main_test_reminder_course">Reminder test</string>
   <string name="main_test_reminder_room">Emulator test</string>
-  <string name="main_test_reminder_summary">Show a reminder now (debug build)</string>
   <string name="main_test_send_failed">Couldn\'t send the test notification. Check notification settings.</string>
   <string name="main_test_sent">Test notification sent</string>
   <string name="main_this_week">This week</string>

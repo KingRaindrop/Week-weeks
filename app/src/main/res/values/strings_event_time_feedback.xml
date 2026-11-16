@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="event_time_summary">%1$s–%2$s · %3$s</string>
+    <string name="event_time_summary_no_end">%1$s · 未设结束时间</string>
+    <string name="event_time_duration_hours_minutes">%1$d小时%2$d分</string>
+    <string name="event_time_duration_hours">%1$d小时</string>
+    <string name="event_time_duration_minutes">%1$d分钟</string>
+    <string name="event_time_error_start_required">请填写开始时间</string>
+    <string name="event_time_error_start_invalid">开始时间无效，请输入 00:00–23:59 范围内的时间</string>
+    <string name="event_time_error_end_invalid">结束时间无效，请输入 00:00–23:59 范围内的时间</string>
+    <string name="event_time_error_order">结束时间需晚于开始时间，且在当天内</string>
+</resources>

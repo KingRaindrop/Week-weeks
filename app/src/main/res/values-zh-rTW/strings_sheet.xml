@@ -28,6 +28,7 @@
     <string name="sheet_even_weeks">雙週</string>
     <string name="sheet_temporary_chip">臨時 · 從本週起</string>
     <string name="sheet_temporary_unavailable">目前不在校曆教學週內，無法設定臨時週次</string>
+    <string name="sheet_temporary_week_limit">臨時課程僅支援第 1–%1$d 週；目前週次已超出支援範圍。既有輸入保持不變。</string>
     <string name="sheet_room_hint">教室 / 地點</string>
     <string name="sheet_color">顏色</string>
     <string name="sheet_color_hint_shared">同名課程共用顏色；色卡為介面效果，HEX 為儲存的原色</string>
@@ -48,10 +49,11 @@
     <string name="sheet_think_again">再想想</string>
 
     <string name="sheet_import_title">匯入課表</string>
-    <string name="sheet_import_pdf_sub">自動辨識從校務系統匯出的課表 PDF</string>
+    <string name="sheet_import_pdf_sub">支援 PDF，以及每行一門課的 XLSX、CSV、TSV、TXT 清單</string>
     <string name="sheet_paste_title">貼上文字課表</string>
     <string name="sheet_import_paste_sub">PDF 樣式不同而無法辨識時，依範例格式整理後貼上</string>
     <string name="sheet_text_badge">文</string>
+    <string name="sheet_file_badge">檔案</string>
     <string name="sheet_label_with_sub">%1$s，%2$s</string>
     <string name="sheet_discard_paste_title">放棄已貼上的內容？</string>
     <string name="sheet_discard_paste_message">關閉後，輸入框中的課表文字不會保留。</string>

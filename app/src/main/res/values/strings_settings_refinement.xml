@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_display_footer">模式决定显示课程、日程或两者；周视图和列表决定查看方式。切换模式保留数据与提醒。</string>
+    <string name="settings_import_footer">从课表文件或粘贴的文本导入课程，确认预览后保存。</string>
+    <string name="settings_reminders_section">提醒</string>
+    <string name="settings_time_footer">节次时间用于课程排课；校历决定学期日期和教学周。</string>
+    <plurals name="settings_period_count">
+        <item quantity="other">%1$d 节</item>
+    </plurals>
+    <string name="settings_font_value">%1$s · %2$d%%</string>
+    <string name="settings_appearance_footer">主题色用于界面控件，课程颜色用于区分课程，可分别调整。</string>
+</resources>

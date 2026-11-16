@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="display_mode_agenda_hint">Week view uses start and end times. Short events or those without an end time keep a minimum height. Tap for details or use ＋ to add.</string>
+    <string name="display_mode_agenda_empty">No events this week. Add an event to get started.</string>
+    <string name="display_mode_event_add_on_day">Add an event for %1$s</string>
+    <string name="display_mode_course_outside_empty">This week is outside the semester and has no courses.</string>
+    <string name="display_mode_course_outside_hint">Courses are scheduled within the semester. Choose a date in the semester to view them.</string>
+    <string name="display_mode_course_outside_cell">%1$s, outside the semester, no courses</string>
+    <string name="display_mode_mine_courses_only">Only courses are shown. Change the displayed content in Settings.</string>
+</resources>

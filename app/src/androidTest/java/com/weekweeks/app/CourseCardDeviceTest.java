@@ -20,9 +20,14 @@ public class CourseCardDeviceTest extends Instrumentation {
     @Override public void onStart() {
         Bundle result = new Bundle();
         try {
+            PasteImportDeviceChecks.run(this);
+            WeekPickerDeviceChecks.run(this);
+            ModalDeviceChecks.run(this);
+            ImportChainDeviceChecks.run(this);
+            ImportRecoveryDeviceChecks.run(this);
             testLayoutAndActionsAcrossConfigurations();
             assertTrue("Legacy two-line room clipping must reproduce", legacyClipCount > 0);
-            result.putString("stream", "PASS: 648 layout/action configurations and badge resizing; legacy clipping reproduced in " + legacyClipCount + " configurations\n");
+            result.putString("stream", "PASS: 22 dark theme roles/button contrast and unchanged classic light colors; paste-import Activity recreation, raw text/selection, discard guard and close cleanup; 648 layout/action configurations and badge resizing; legacy clipping reproduced in " + legacyClipCount + " configurations\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable t) {
             result.putString("stream", android.util.Log.getStackTraceString(t));
@@ -43,6 +48,7 @@ public class CourseCardDeviceTest extends Instrumentation {
         final Throwable[] failure = new Throwable[1];
         getInstrumentation().runOnMainSync(() -> {
             try {
+                verifyThemeRoles();
                 for (boolean dark : new boolean[]{false, true})
                     for (float scale : new float[]{1f, 1.5f, 2f})
                         for (String language : new String[]{"zh", "zh-TW", "en"})
@@ -54,6 +60,28 @@ public class CourseCardDeviceTest extends Instrumentation {
             } catch (Throwable t) { failure[0] = t; }
         });
         if (failure[0] != null) throw failure[0];
+    }
+    private void verifyThemeRoles() throws Exception {
+        Context context = getTargetContext();
+        for (int[] pair : UiAccentPalette.COLORS) {
+            PastelAccent theme = PastelAccent.of(pair[1], true);
+            assertEquals("accent", pair[1], theme.accent);
+            assertEquals("mist container", DarkUiPalette.tint(pair[1]), theme.tint);
+            assertEquals("hero start", DarkUiPalette.heroStart(pair[1]), theme.heroStart);
+            assertEquals("hero end", DarkUiPalette.heroEnd(pair[1]), theme.heroEnd);
+            PastelTimetableView view = new PastelTimetableView(context, true, theme, null);
+            assertEquals("neutral background", DarkUiPalette.BACKGROUND, (Integer)field(view, "background"));
+            assertEquals("neutral surface", DarkUiPalette.SURFACE, (Integer)field(view, "surface"));
+            PastelCourseSheet sheet = new PastelCourseSheet(context, true, theme);
+            assertEquals("sheet surface", DarkUiPalette.SURFACE, (Integer)field(sheet, "sheetBg"));
+            Method button = PastelCourseSheet.class.getDeclaredMethod("primaryButton", String.class, int.class);
+            button.setAccessible(true);
+            TextView b = (TextView)button.invoke(sheet, "Save", theme.accent);
+            assertTrue("button contrast", CoursePalette.contrast(b.getCurrentTextColor(), theme.accent) >= 4.5);
+        }
+        PastelAccent light = PastelAccent.classic(false);
+        assertEquals("light tint unchanged", 0xFFECEEF9, light.tint);
+        assertEquals("light hero unchanged", 0xFF263D78, light.heroStart);
     }
     @SuppressWarnings("unchecked")
     private void verify(boolean dark, float scale, String language, int width, int periods, boolean teacher, boolean finished) throws Exception {

@@ -1,0 +1,11 @@
+// Isolated timeline integration runner; never replaces the user-facing application.
+gradle.beforeProject { project ->
+    project.pluginManager.withPlugin('com.android.application') {
+        project.androidComponents.finalizeDsl { android ->
+            android.defaultConfig.applicationId = 'com.weekweeks.app.audit'
+            android.defaultConfig.testInstrumentationRunner = 'com.weekweeks.app.AgendaTimelineDeviceTest'
+            android.buildTypes.debug.buildConfigField 'boolean', 'ENABLE_TEST_COURSE', 'false'
+            // Keep production font assets; optional runner argument: -e font oppo_sans.
+        }
+    }
+}

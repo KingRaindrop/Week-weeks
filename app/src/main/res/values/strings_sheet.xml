@@ -30,6 +30,7 @@
     <string name="sheet_even_weeks">双周</string>
     <string name="sheet_temporary_chip">临时 · 从本周起</string>
     <string name="sheet_temporary_unavailable">当前不在校历教学周内，无法设置临时周次</string>
+    <string name="sheet_temporary_week_limit">临时课程仅支持第 1–%1$d 周；当前周已超出支持范围。已有输入保持不变。</string>
     <string name="sheet_room_hint">教室 / 地点</string>
     <string name="sheet_color">颜色</string>
     <string name="sheet_color_hint_shared">同名课程共享颜色；色卡为界面效果，HEX 为保存原色</string>
@@ -52,10 +53,11 @@
 
     <!-- Import -->
     <string name="sheet_import_title">导入课表</string>
-    <string name="sheet_import_pdf_sub">从教务系统导出的课表 PDF 自动识别</string>
+    <string name="sheet_import_pdf_sub">支持 PDF，以及每行一门课的 XLSX、CSV、TSV、TXT 列表</string>
     <string name="sheet_paste_title">粘贴文本课表</string>
     <string name="sheet_import_paste_sub">PDF 样式不同识别不了时，按示例格式整理后粘贴</string>
     <string name="sheet_text_badge">文</string>
+    <string name="sheet_file_badge">文件</string>
     <string name="sheet_label_with_sub">%1$s，%2$s</string>
     <string name="sheet_discard_paste_title">放弃已粘贴的内容？</string>
     <string name="sheet_discard_paste_message">关闭后，输入框里的课表文本不会保留。</string>

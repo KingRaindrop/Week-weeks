@@ -1,0 +1,12 @@
+<resources>
+    <string name="week_picker_title">選擇週次</string>
+    <string name="week_picker_summary">第 1–%1$d 週 · 點按即切換</string>
+    <string name="week_picker_viewing_week">正在查看第 %1$d 週</string>
+    <string name="week_picker_outside">正在查看學期外日期；仍可按日期尋找個人日程</string>
+    <string name="week_picker_week">第 %1$d 週</string>
+    <string name="week_picker_viewing">正在查看</string>
+    <string name="week_picker_this_week">本週</string>
+    <string name="week_picker_current">回到本週</string>
+    <string name="week_picker_find_date">按日期尋找（含學期外日程）</string>
+    <string name="week_picker_close">關閉</string>
+</resources>
