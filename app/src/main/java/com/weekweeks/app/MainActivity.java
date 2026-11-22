@@ -21,7 +21,9 @@ import android.text.InputFilter;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
@@ -130,6 +132,43 @@ public class MainActivity extends AppCompatActivity {
     private final List<PersonalEvent> personalEvents = new ArrayList<>();
     /** Stored events could not be decrypted: never overwrite them. */
     private boolean eventsLocked = false;
+    private final Map<Long,Course> shownLessons = new HashMap<>();
+    private final Map<Long,PersonalEvent> shownEvents = new HashMap<>();
+    private LessonChangeDialog activeLessonChange;
+    private int detailLessonDate, detailEventDate, editEventDate;
+    private LessonSchedule lessons() { return new LessonSchedule(calendarStartMillis(),calendarEndMillis()); }
+    private Course shownLesson(long id) { Course c=shownLessons.get(id); return c!=null ? c : findCourseById(id); }
+    private PersonalEvent shownEvent(long id) { PersonalEvent e=shownEvents.get(id); return e!=null ? e : findPersonalEvent(id); }
+    private Course lessonAt(Course base,int date) {
+        if(base==null || date==0) return base;
+        LessonSchedule.Change change=base.changes.get(date);
+        return lessons().active(base,date) && (change==null || change.target!=0) ? LessonSchedule.project(base,date,change) : null;
+    }
+    // View handles are separate from stored IDs: two occurrences of a series can share the same day.
+    private long viewHandle(long base,int source) {
+        long value=(base^(0x9e3779b97f4a7c15L*source))*0x632be59bd9b4e019L;
+        return value|Long.MIN_VALUE;
+    }
+    private long lessonHandle(Course c) {
+        long handle=c.id;
+        if(c.sourceDate!=0) {
+            Course previous=shownLessons.get(handle);
+            if(coursesHaveChange(c) || previous!=null && previous.sourceDate!=c.sourceDate) {
+                handle=viewHandle(c.id,c.sourceDate);
+                while(findCourseById(handle)!=null || (shownLessons.containsKey(handle) &&
+                        (shownLessons.get(handle).id!=c.id || shownLessons.get(handle).sourceDate!=c.sourceDate))) handle++;
+            }
+        }
+        shownLessons.put(handle,c); return handle;
+    }
+    private boolean coursesHaveChange(Course c) { Course base=findCourseById(c.id); return base!=null && base.changes.containsKey(c.sourceDate); }
+    private long eventHandle(PersonalEvent e) {
+        long handle=e.id;
+        if(e.sourceDate!=0) { handle=viewHandle(e.id,e.sourceDate);
+            while(findPersonalEvent(handle)!=null || shownEvents.containsKey(handle)) handle++;
+        }
+        shownEvents.put(handle,e); return handle;
+    }
     private final List<String> periodTimes = new ArrayList<>();
     private final Map<String, CountdownSnapshot> countdownSnapshots = new HashMap<>();
     private final Map<String, Long> stoppedShakeKeys = new HashMap<>();
@@ -151,6 +190,7 @@ public class MainActivity extends AppCompatActivity {
     private long activeEventId;
     private boolean eventFromMine;
     private PastelCourseSheet.MinePage minePage;
+    private long nextMineOccurrenceRefresh = Long.MAX_VALUE;
     private Bundle pendingEventRestore;
     private final ModalCoordinator modalCoordinator = new ModalCoordinator();
     private final List<PastelCourseSheet> modalSheets = new ArrayList<>();
@@ -221,6 +261,11 @@ public class MainActivity extends AppCompatActivity {
     private int daySwipeAxis = 0; // 0=undecided, 1=horizontal, 2=vertical
     private int daySwipePointerId = MotionEvent.INVALID_POINTER_ID;
     private boolean daySwipeChildCancelled = false;
+    private MotionEvent daySwipeStartEvent;
+    private VelocityTracker daySwipeVelocityTracker;
+    private int daySwipeTouchSlop;
+    private int daySwipeMinFlingVelocity;
+    private int daySwipeMaxFlingVelocity;
     private int themeMode = 1; // 1=浅色, 2=深色
     private DisplayMode displayMode = DisplayMode.COMBINED;
     private static final String STATE_SELECTED_DAY = "state_selected_day";
@@ -237,6 +282,10 @@ public class MainActivity extends AppCompatActivity {
         courseColorNames = CoursePalette.appendNames(getResources().getStringArray(R.array.main_course_color_names));
         applyAppNightMode();
         super.onCreate(savedInstanceState);
+        ViewConfiguration touchConfiguration = ViewConfiguration.get(this);
+        daySwipeTouchSlop = touchConfiguration.getScaledTouchSlop();
+        daySwipeMinFlingVelocity = Math.max(touchConfiguration.getScaledMinimumFlingVelocity(), dp(420));
+        daySwipeMaxFlingVelocity = touchConfiguration.getScaledMaximumFlingVelocity();
         // Deferred windows (import review, reminder popup) wait for real idleness, never overlap.
         modalCoordinator.setIdleListener(() -> uiHandler.post(this::drainDeferredModals));
         loadThemeMode();
@@ -270,6 +319,9 @@ public class MainActivity extends AppCompatActivity {
         if (savedInstanceState != null) {
             pastelBrowseDate = savedInstanceState.getLong("agenda_browse_date", 0L);
             browseTimeZoneId = savedInstanceState.getString("agenda_browse_zone", browseTimeZoneId);
+            detailLessonDate=savedInstanceState.getInt("detail_lesson_date");
+            detailEventDate=savedInstanceState.getInt("detail_event_date");
+            editEventDate=savedInstanceState.getInt("edit_event_date");
             activeCourseDetailId = savedInstanceState.getLong("course_detail_id", 0L);
             pendingCourseDetailRestore = activeCourseDetailId != 0L;
             pendingCourseRestore = savedInstanceState.getBundle("course_editor");
@@ -292,7 +344,6 @@ public class MainActivity extends AppCompatActivity {
             calendarDraft = CalendarSetupDialog.State.restore(savedInstanceState.getBundle("calendar_draft"));
             ArrayList<Bundle> reminders = savedInstanceState.getParcelableArrayList("reminder_popups");
             if (reminders != null) pendingReminderPopups.addAll(reminders);
-            if (importFlow != null) pendingPasteRestore = null; // accepted text is now a review, not an editor
 
         }
         buildLayout();
@@ -301,6 +352,11 @@ public class MainActivity extends AppCompatActivity {
             pastelTimetable.restoreUiState(savedInstanceState.getBoolean("agenda_tab", false),
                     savedInstanceState.getInt("agenda_scroll", 0));
             if (savedInstanceState.getBoolean("mine_visible", false)) pastelTimetable.setMineSelected(true);
+            int legacyScroll = savedInstanceState.getInt("agenda_scroll", 0);
+            pastelTimetable.restorePageScrollPositions(
+                    savedInstanceState.getInt("week_scroll", legacyScroll),
+                    savedInstanceState.getInt("list_scroll", legacyScroll),
+                    savedInstanceState.getInt("mine_scroll", 0));
         }
         if (pastelTimetable != null) {
             getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
@@ -334,7 +390,7 @@ public class MainActivity extends AppCompatActivity {
             });
         } else if (pendingEventRestore != null) {
             uiHandler.post(() -> {
-                PersonalEvent event = activeEventId == 0 ? null : findPersonalEvent(activeEventId);
+                PersonalEvent event = eventAt(activeEventId,editEventDate);
                 if (activeEventId != 0 && event == null) {
                     pendingEventRestore = null;
                     activeEventId = 0;
@@ -346,13 +402,13 @@ public class MainActivity extends AppCompatActivity {
         } else if (pendingCourseDetailRestore) {
             uiHandler.post(() -> {
                 pendingCourseDetailRestore = false;
-                Course course = findCourseById(activeCourseDetailId);
+                Course course = lessonAt(findCourseById(activeCourseDetailId),detailLessonDate);
                 if (course != null) showPastelCourseDetail(course);
                 else activeCourseDetailId = 0;
             });
         } else if (activeEventDetailId != 0) {
             uiHandler.post(() -> {
-                PersonalEvent event = findPersonalEvent(activeEventDetailId);
+                PersonalEvent event = eventAt(activeEventDetailId,detailEventDate);
                 if (event != null) showPersonalEventDetail(event);
                 else {
                     activeEventDetailId = 0;
@@ -372,6 +428,11 @@ public class MainActivity extends AppCompatActivity {
                 else if ("accent".equals(kind)) showAccentColorDialog();
                 else if ("week_picker".equals(kind)) showWeekPickerDialog();
                 else if ("date_picker".equals(kind)) showPastelDatePicker();
+                else if ("change_scope".equals(kind) || "lesson_change".equals(kind)) {
+                    Bundle state=pendingSettingsRestore; pendingSettingsRestore=null;
+                    if("change_scope".equals(kind)) showChangeScope(state.getBoolean("event"),state.getLong("id"),state.getInt("source"));
+                    else showLessonChange(state.getLong("id"),state.getInt("source"),state);
+                }
                 else if ("overlap_courses".equals(kind)) {
                     long[] ids = pendingSettingsRestore.getLongArray("ids");
                     pendingSettingsRestore = null;
@@ -402,7 +463,7 @@ public class MainActivity extends AppCompatActivity {
             maybeShowReminderPopupFromIntent(getIntent());
         ensureNotificationPermission();
         maybeSendDebugReminderTestNotification(getIntent());
-        scheduleClassReminderNotifications();
+        refreshClassReminderNotifications();
         // Calendar setup belongs to a successful timetable import, not app launch.
         if (savedInstanceState != null) {
             String importUri = savedInstanceState.getString(STATE_IMPORT_URI);
@@ -420,6 +481,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
+        cancelPendingDaySwipe();
         super.onSaveInstanceState(outState);
         if (settingsOverlayVisible()) captureSettingsPosition(null);
         Bundle settingsNavigation = new Bundle();
@@ -435,10 +497,9 @@ public class MainActivity extends AppCompatActivity {
         if (settingsDraftCapture != null) outState.putBundle("settings_draft", settingsDraftCapture.capture());
         else if (pendingSettingsRestore != null) outState.putBundle("settings_draft", pendingSettingsRestore);
         Bundle pasteDraft = activePasteImport == null ? null : activePasteImport.capturePasteImportState();
-        if (importFlow == null) {
-            if (pasteDraft != null) outState.putBundle("paste_import", pasteDraft);
-            else if (pendingPasteRestore != null) outState.putBundle("paste_import", pendingPasteRestore);
-        }
+        // A file can finish parsing behind an unfinished paste editor; preserve both drafts.
+        if (pasteDraft != null) outState.putBundle("paste_import", pasteDraft);
+        else if (pendingPasteRestore != null) outState.putBundle("paste_import", pendingPasteRestore);
         outState.putBundle("import_flow", ImportFlowStateCodec.save(importFlow));
         CalendarSetupDialog.State calendarState = calendarEditor != null ? calendarEditor.capture() : calendarDraft;
         if (calendarState != null) outState.putBundle("calendar_draft", calendarState.save());
@@ -446,9 +507,15 @@ public class MainActivity extends AppCompatActivity {
         outState.putString("agenda_browse_zone", browseTimeZoneId);
         outState.putBoolean("mine_visible", pastelTimetable != null && pastelTimetable.isMine());
         outState.putBoolean("event_from_mine", eventFromMine);
+        outState.putInt("detail_lesson_date",detailLessonDate);
+        outState.putInt("detail_event_date",detailEventDate);
+        outState.putInt("edit_event_date",editEventDate);
         if (pastelTimetable != null) {
             outState.putBoolean("agenda_tab", pastelTimetable.isAgenda());
             outState.putInt("agenda_scroll", pastelTimetable.scrollPosition());
+            outState.putInt("week_scroll", pastelTimetable.weekScrollPosition());
+            outState.putInt("list_scroll", pastelTimetable.listScrollPosition());
+            outState.putInt("mine_scroll", pastelTimetable.mineScrollPosition());
         }
         if (activeEventEditor != null) {
             Bundle draft = activeEventEditor.captureEventEditorState();
@@ -500,7 +567,7 @@ public class MainActivity extends AppCompatActivity {
         countdownSnapshots.clear();
         render();
         scheduleMinuteTick();
-        scheduleClassReminderNotifications();
+        refreshClassReminderNotifications();
         refreshSettingsReminderStatus();
         uiHandler.post(this::drainDeferredModals);
     }
@@ -508,6 +575,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         activityResumed = false;
+        cancelPendingDaySwipe();
         pdfImportDelivery.setResumed(false);
         minuteHandler.removeCallbacks(minuteTick);
         cancelCourseCardAnimations(courseList);
@@ -524,7 +592,9 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         // Invalidate ownership before dismiss callbacks: never open a successor on a dead Activity.
         destroyingActivity = true;
+        cancelPendingDaySwipe();
         modalCoordinator.destroy();
+        if (activeLessonChange!=null) activeLessonChange.closeChildren();
         if (calendarEditor != null) calendarEditor.closeChild();
         if (outsideTermDialog != null) outsideTermDialog.dismiss();
         if (weekPickerDialog != null) weekPickerDialog.dismiss();
@@ -564,66 +634,143 @@ public class MainActivity extends AppCompatActivity {
     public boolean dispatchTouchEvent(MotionEvent event) {
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
+            // Honour a released swipe before a new touch, including a rapid second swipe.
+            if (pastelTimetable != null) pastelTimetable.finishReleasedTabTransition();
+            cancelPendingDaySwipe();
+            resetDaySwipe();
             daySwipeDownX = event.getX();
             daySwipeDownY = event.getY();
             daySwipeTracking = isDaySwipeStartAllowed(event);
-            daySwipeAxis = 0;
             daySwipePointerId = event.getPointerId(0);
-            daySwipeChildCancelled = false;
-        } else if (action == MotionEvent.ACTION_POINTER_DOWN) {
-            daySwipeTracking = false;
-            daySwipeAxis = 2;
-        } else if (action == MotionEvent.ACTION_POINTER_UP) {
-            int pointerIndex = event.getActionIndex();
-            if (pointerIndex >= 0 && event.getPointerId(pointerIndex) == daySwipePointerId) {
-                daySwipeTracking = false;
-                daySwipeAxis = 2;
+            if (daySwipeTracking) daySwipeStartEvent = MotionEvent.obtain(event);
+            if (daySwipeTracking && pastelTimetable != null) {
+                daySwipeVelocityTracker = VelocityTracker.obtain();
+                daySwipeVelocityTracker.addMovement(event);
             }
-        } else if (action == MotionEvent.ACTION_MOVE && daySwipeTracking) {
+            return super.dispatchTouchEvent(event);
+        }
+
+        if (daySwipeTracking && !isDaySwipeContextAllowed()) {
+            cancelChildTouch(event);
+            cancelDaySwipe();
+        }
+        // Once a child has received CANCEL, it must not receive the remaining pointer/UP events.
+        if (!daySwipeTracking && daySwipeChildCancelled) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) resetDaySwipe();
+            return true;
+        }
+        if (daySwipeVelocityTracker != null) daySwipeVelocityTracker.addMovement(event);
+
+        if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
+            boolean consumed = daySwipeChildCancelled;
+            cancelDaySwipe();
+            return consumed || super.dispatchTouchEvent(event);
+        }
+        if (action == MotionEvent.ACTION_CANCEL) {
+            boolean consumed = daySwipeChildCancelled;
+            cancelDaySwipe();
+            resetDaySwipe();
+            return consumed || super.dispatchTouchEvent(event);
+        }
+
+        if ((action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) && daySwipeTracking) {
             int pointerIndex = event.findPointerIndex(daySwipePointerId);
             if (pointerIndex < 0) {
-                daySwipeTracking = false;
+                boolean consumed = daySwipeChildCancelled;
+                cancelDaySwipe();
+                if (action == MotionEvent.ACTION_UP) resetDaySwipe();
+                return consumed || super.dispatchTouchEvent(event);
             } else {
                 float distanceX = event.getX(pointerIndex) - daySwipeDownX;
                 float distanceY = event.getY(pointerIndex) - daySwipeDownY;
                 float absX = Math.abs(distanceX);
                 float absY = Math.abs(distanceY);
-                if (daySwipeAxis == 0 && Math.max(absX, absY) >= dp(14)) {
+                int touchSlop = pastelTimetable == null ? dp(14) : daySwipeTouchSlop;
+                if (daySwipeAxis == 0 && Math.max(absX, absY) >= touchSlop) {
                     if (absX >= absY * 1.35f && canSwitchDayBySwipe(distanceX)) {
                         daySwipeAxis = 1;
                         cancelChildTouch(event);
-                    } else if (absY > absX) {
+                        if (pastelTimetable != null) pastelTimetable.beginTabDrag();
+                    } else if (pastelTimetable != null ? absY >= touchSlop : absY > absX) {
                         daySwipeAxis = 2;
+                        recycleDaySwipeVelocity();
                     }
                 }
-                if (daySwipeAxis == 1) {
+                if (pastelTimetable != null && daySwipeAxis == 1) {
+                    pastelTimetable.dragTab(distanceX);
+                    if (action == MotionEvent.ACTION_UP) {
+                        float velocityX = 0;
+                        if (daySwipeVelocityTracker != null) {
+                            daySwipeVelocityTracker.computeCurrentVelocity(1000, daySwipeMaxFlingVelocity);
+                            velocityX = daySwipeVelocityTracker.getXVelocity(daySwipePointerId);
+                        }
+                        pastelTimetable.endTabDrag(velocityX, daySwipeMinFlingVelocity,
+                                Math.max(daySwipeTouchSlop * 2, dp(24)));
+                        resetDaySwipe();
+                    }
                     return true;
                 }
+                if (action == MotionEvent.ACTION_UP) {
+                    if (daySwipeAxis != 2 && isDaySwipeGesture(distanceX, distanceY)
+                            && canSwitchDayBySwipe(distanceX)) {
+                        cancelChildTouch(event);
+                        handleDaySwipe(distanceX, distanceY);
+                    }
+                    boolean consumed = daySwipeChildCancelled;
+                    resetDaySwipe();
+                    return consumed || super.dispatchTouchEvent(event);
+                }
+                if (daySwipeAxis == 1) return true;
             }
-        } else if (action == MotionEvent.ACTION_UP) {
-            float distanceX = event.getX() - daySwipeDownX;
-            float distanceY = event.getY() - daySwipeDownY;
-            if (daySwipeTracking
-                    && daySwipeAxis != 2
-                    && isDaySwipeGesture(distanceX, distanceY)
-                    && canSwitchDayBySwipe(distanceX)) {
-                cancelChildTouch(event);
-                handleDaySwipe(distanceX, distanceY);
-                daySwipeTracking = false;
-                return true;
-            }
-            if (daySwipeAxis == 1) {
-                daySwipeTracking = false;
-                return true;
-            }
-            daySwipeTracking = false;
-        } else if (action == MotionEvent.ACTION_CANCEL) {
-            daySwipeTracking = false;
-            daySwipeAxis = 0;
-            daySwipePointerId = MotionEvent.INVALID_POINTER_ID;
-            daySwipeChildCancelled = false;
         }
+        if (action == MotionEvent.ACTION_UP) resetDaySwipe();
         return super.dispatchTouchEvent(event);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus) cancelPendingDaySwipe();
+    }
+
+    private void recycleDaySwipeVelocity() {
+        if (daySwipeVelocityTracker != null) {
+            daySwipeVelocityTracker.recycle();
+            daySwipeVelocityTracker = null;
+        }
+    }
+
+    private void recycleDaySwipeStartEvent() {
+        if (daySwipeStartEvent != null) {
+            daySwipeStartEvent.recycle();
+            daySwipeStartEvent = null;
+        }
+    }
+
+    /** A window/overlay interruption also cancels a pending tap or long press underneath it. */
+    private void cancelPendingDaySwipe() {
+        if (daySwipeTracking && !daySwipeChildCancelled && daySwipeStartEvent != null)
+            cancelChildTouch(daySwipeStartEvent);
+        cancelDaySwipe();
+    }
+
+    /** Cancels the preview, retaining ownership of an already intercepted touch stream. */
+    private void cancelDaySwipe() {
+        daySwipeTracking = false;
+        daySwipeAxis = 2;
+        daySwipePointerId = MotionEvent.INVALID_POINTER_ID;
+        recycleDaySwipeVelocity();
+        recycleDaySwipeStartEvent();
+        if (pastelTimetable != null) pastelTimetable.cancelTabTransition();
+    }
+
+    private void resetDaySwipe() {
+        daySwipeTracking = false;
+        daySwipeAxis = 0;
+        daySwipePointerId = MotionEvent.INVALID_POINTER_ID;
+        daySwipeChildCancelled = false;
+        recycleDaySwipeVelocity();
+        recycleDaySwipeStartEvent();
     }
 
     private void cancelChildTouch(MotionEvent source) {
@@ -638,10 +785,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean isDaySwipeStartAllowed(MotionEvent event) {
-        if (settingsOverlay != null && settingsOverlay.getParent() != null) {
-            return false;
-        }
+        if (!isDaySwipeContextAllowed()) return false;
+        if (pastelTimetable != null)
+            return pastelTimetable.isTabSwipeStartAllowed(event.getRawX(), event.getRawY());
         return !isTouchInsideDayTabs(event) && !isTouchInsideWeekNav(event);
+    }
+
+    private boolean isDaySwipeContextAllowed() {
+        return !settingsOverlayVisible() && modalCoordinator.state() == ModalCoordinator.State.IDLE
+                && !activityRecreating && !isFinishing() && !isDestroyed();
     }
 
     private boolean isTouchInsideDayTabs(MotionEvent event) {
@@ -679,8 +831,6 @@ public class MainActivity extends AppCompatActivity {
         int direction = distanceX < 0 ? 1 : -1;
         if (pastelTimetable != null) {
             if (!pastelTimetable.canSwipeTab(direction)) return false;
-            // Leaving 「我的」 by swipe ends its navigation context, like tapping another tab.
-            if (pastelTimetable.isMine()) eventFromMine = false;
             pastelTimetable.swipeTab(direction);
             return true;
         }
@@ -816,6 +966,16 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void refreshClassReminderNotifications() {
+        if ((storageLocked && eventsLocked) || !notificationsEnabled()) return;
+        // Legacy unversioned alarms still require the normal migration/cancellation path once.
+        if (!"[]".equals(getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(REMINDER_CODES_KEY, "[]"))) {
+            scheduleClassReminderNotifications();
+            return;
+        }
+        ReminderSourceRebuilder.refresh(this);
+    }
+
     private void scheduleClassReminderNotifications() {
         if ((storageLocked && eventsLocked) || !notificationsEnabled()) {
             return;
@@ -942,13 +1102,13 @@ public class MainActivity extends AppCompatActivity {
                     showPastelCourseEditor(null, clamp(day, 0, 6), clamp(period, 1, periodCount()));
                 }
                 @Override public void onCourse(long id) {
-                    Course course = findCourseById(id);
+                    Course course = shownLesson(id);
                     if (course != null) showPastelCourseDetail(course);
                 }
                 @Override public void onCourses(long[] ids) { showOverlappingCourses(ids); }
                 @Override public void onEditCourse(long id) {
-                    Course course = findCourseById(id);
-                    if (course != null) showPastelCourseEditor(course, course.day, course.period);
+                    Course course = shownLesson(id);
+                    if (course != null) chooseLessonEdit(course);
                 }
                 @Override public void onPreviousWeek() { stepViewingWeek(-1); }
                 @Override public void onNextWeek() { stepViewingWeek(1); }
@@ -967,11 +1127,14 @@ public class MainActivity extends AppCompatActivity {
                 }
                 @Override public void onEvent(long id) {
                     if (!mayOpenModal()) return;
-                    PersonalEvent event = findPersonalEvent(id);
+                    PersonalEvent event = shownEvent(id);
                     if (event != null) { eventFromMine = false; showPersonalEventDetail(event); }
                 }
                 @Override public void onEvents(long[] ids) { showOverlappingEvents(ids); }
                 @Override public void onMine() { showMineSheet(); }
+                @Override public void onTabChanged(int previous, int current) {
+                    if (previous == 2 && current != 2) eventFromMine = false;
+                }
             });
             minePage = new PastelCourseSheet(this, isDarkMode, pastelAccent()).minePage(
                     () -> {
@@ -979,16 +1142,17 @@ public class MainActivity extends AppCompatActivity {
                         eventFromMine = true;
                         showPersonalEventEditor(null);
                     },
-                    id -> {
+                    row -> {
                         if (!mayOpenModal()) return;
-                        PersonalEvent event = findPersonalEvent(id);
+                        // Open the date the user actually tapped, even at a recurrence boundary.
+                        PersonalEvent event = eventAt(row.id, row.sourceDate);
                         if (event != null) {
                             eventFromMine = true;
                             showPersonalEventDetail(event);
                         }
                     },
                     this::showSettingsDialogV2);
-            pastelTimetable.setMinePage(minePage.view);
+            pastelTimetable.setMinePage(minePage);
             setContentView(pastelTimetable);
             return;
         }
@@ -1238,7 +1402,7 @@ public class MainActivity extends AppCompatActivity {
     private PastelTimetableView.Entry pastelEntry(Course course) {
         if (course == null) return null;
         PastelTimetableView.Entry entry = new PastelTimetableView.Entry();
-        entry.id = course.id;
+        entry.id = lessonHandle(course);
         entry.day = course.day;
         entry.start = course.period;
         entry.end = Math.max(course.period, course.endPeriod);
@@ -1254,16 +1418,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderPastelTimetable() {
+        pastelTimetable.updateContent(this::bindPastelTimetable);
+    }
+
+    private void bindPastelTimetable() {
         pastelTimetable.setDisplayMode(displayMode);
         long start = pastelDisplayedStart();
         int week = AgendaDates.week(calendarStartMillis(), start);
         boolean outside = week < 1 || week > calendarTotalWeeks();
         boolean preview = outside || start != AgendaDates.weekStart(calendarStartMillis(), System.currentTimeMillis());
         List<PastelTimetableView.Entry> entries = new ArrayList<>();
-        for (Course course : courses) {
-            if (displayMode.showsCourses() && !outside && !course.temporary && courseOccursInTeachingWeek(course, week)) {
-                entries.add(pastelEntry(course));
-            }
+        shownLessons.clear();
+        if(displayMode.showsCourses() && !outside) {
+            LessonSchedule term=lessons(); int from=ScheduleDay.at(start), to=ScheduleDay.at(AgendaDates.shift(start,6));
+            for(Course series:courses) for(Course occurrence:term.between(series,from,to)) entries.add(pastelEntry(occurrence));
         }
         Course featured = displayMode.showsCourses() && !preview ? currentCourseInProgress() : null;
         String featureStatus = featured != null ? getString(R.string.main_feature_now) : getString(R.string.main_feature_plan);
@@ -1619,7 +1787,10 @@ public class MainActivity extends AppCompatActivity {
             render();
             return;
         }
-        if (pastelTimetable != null) pastelTimetable.tick();
+        if (pastelTimetable != null) {
+            if (pastelTimetable.isMine() && System.currentTimeMillis() >= nextMineOccurrenceRefresh) refreshMinePage();
+            pastelTimetable.tick();
+        }
         invalidateCourseProgressViews(courseList);
     }
 
@@ -1633,9 +1804,10 @@ public class MainActivity extends AppCompatActivity {
                 .append(currentSchoolDay())
                 .append(':')
                 .append(selectedDay);
-        for (Course course : courses) {
+        // Use the same dates and periods as the cards and countdown, including a moved lesson.
+        for (Course course : pastelTimetable == null ? courses : shownLessons.values()) {
             signature.append('|')
-                    .append(course.id)
+                    .append(course.id).append('/').append(course.sourceDate)
                     .append('=')
                     .append(courseTemporalState(course).ordinal());
         }
@@ -2739,6 +2911,13 @@ public class MainActivity extends AppCompatActivity {
         else AppFonts.install(dialog);
     }
 
+    /** Settings children share the same visual hierarchy while retaining their dialog ownership. */
+    private void showOwnedSettingsDialog(ModalCoordinator.Token token, AlertDialog dialog,
+                                         Runnable cleanup, Runnable successor) {
+        showOwnedDialog(token, dialog, false, cleanup, successor);
+        SettingsDialogStyle.of(this).apply(dialog);
+    }
+
     /** All first deliveries and restored flows use the same foreground/overlay gate. */
     private void drainDeferredModals() {
         if (restoringInteractions || activityRecreating || !activityResumed || !mayOpenModal()) return;
@@ -2778,9 +2957,10 @@ public class MainActivity extends AppCompatActivity {
     private void showOverlappingCourses(long[] ids) {
         if (!mayOpenModal()) return;
         List<Course> choices = new ArrayList<>();
+        List<Long> handles=new ArrayList<>();
         for (long id : ids) {
-            Course course = findCourseById(id);
-            if (course != null) choices.add(course);
+            Course course = shownLesson(id);
+            if (course != null) { choices.add(course); handles.add(id); }
         }
         if (choices.isEmpty()) return;
         ModalCoordinator.Token token = acquireModal("overlap_courses");
@@ -2801,9 +2981,9 @@ public class MainActivity extends AppCompatActivity {
                 .setTitle(R.string.overlap_courses_title)
                 .setItems(labels, (d, which) -> {
                     draftCleanup.run();
-                    long id = choices.get(which).id;
+                    long id = handles.get(which);
                     modalCoordinator.switchAfterDismiss(token, () -> {
-                        Course latest = findCourseById(id);
+                        Course latest = shownLesson(id);
                         if (latest != null) showPastelCourseDetail(latest);
                     });
                 })
@@ -2819,10 +2999,11 @@ public class MainActivity extends AppCompatActivity {
     private void showOverlappingEvents(long[] ids) {
         if (!mayOpenModal() || !displayMode.showsEvents() || ids == null) return;
         List<PersonalEvent> choices = new ArrayList<>();
+        List<Long> handles=new ArrayList<>();
         java.util.Set<Long> seen = new java.util.HashSet<>();
         for (long id : ids) {
-            PersonalEvent event = findPersonalEvent(id);
-            if (event != null && event.showInTimetable && seen.add(id)) choices.add(event);
+            PersonalEvent event = shownEvent(id);
+            if (event != null && event.showInTimetable && seen.add(id)) { choices.add(event); handles.add(id); }
         }
         if (choices.isEmpty()) return;
         ModalCoordinator.Token token = acquireModal("overlap_events");
@@ -2832,7 +3013,7 @@ public class MainActivity extends AppCompatActivity {
         long[] choiceIds = new long[choices.size()];
         for (int i = 0; i < choices.size(); i++) {
             PersonalEvent event = choices.get(i);
-            choiceIds[i] = event.id;
+            choiceIds[i] = handles.get(i);
             labels[i] = event.title + "\n" + event.timeLabel()
                     + (TextUtils.isEmpty(event.location) ? "" : " · " + event.location);
         }
@@ -2848,7 +3029,7 @@ public class MainActivity extends AppCompatActivity {
                     draftCleanup.run();
                     long id = choiceIds[which];
                     modalCoordinator.switchAfterDismiss(token, () -> {
-                        PersonalEvent latest = findPersonalEvent(id);
+                        PersonalEvent latest = shownEvent(id);
                         if (latest != null) {
                             eventFromMine = false;
                             showPersonalEventDetail(latest);
@@ -2864,11 +3045,79 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void chooseLessonEdit(Course displayed) {
+        Course series=findCourseById(displayed.id);
+        if(series==null) return;
+        if(displayed.sourceDate!=0 && !series.invalidWeeks) showChangeScope(false,series.id,displayed.sourceDate);
+        else showPastelCourseEditor(series,series.day,series.period);
+    }
+
+    private void showChangeScope(boolean event,long id,int source) {
+        Course course=event?null:findCourseById(id);
+        PersonalEvent base=event?findPersonalEvent(id):null;
+        PersonalEvent item=event?eventAt(id,source):null;
+        Course lesson=event?null:lessonAt(course,source);
+        if(event?item==null:lesson==null) return;
+        int actual=event?ScheduleDay.of(item):lesson.actualDate;
+        ModalCoordinator.Token token=acquireModal("change_scope"); if(token==null) return;
+        Runnable cleanup=beginSettingsDraft(()->{Bundle b=new Bundle();b.putString("kind","change_scope");
+            b.putBoolean("event",event);b.putLong("id",id);b.putInt("source",source);return b;});
+        String[] choices={getString(R.string.scope_once,ScheduleDay.label(actual)),getString(event?R.string.scope_event:R.string.scope_lesson)};
+        AlertDialog dialog=SettingsDialogStyle.of(this).builder().setTitle(R.string.scope_title).setItems(choices,(d,w)->
+            modalCoordinator.switchAfterDismiss(token,()->{
+                if(event) showPersonalEventEditor(w==0?item:base);
+                else if(w==0) showLessonChange(id,source,null);
+                else showPastelCourseEditor(course,course.day,course.period);
+            })).setNegativeButton(R.string.action_cancel,null).create();
+        showOwnedSettingsDialog(token,dialog,cleanup,null);
+    }
+
+    private void showLessonChange(long id,int source,Bundle restored) {
+        Course base=findCourseById(id), occurrence=lessonAt(base,source);
+        if(occurrence==null || storageLocked || source==0) return;
+        ModalCoordinator.Token token=acquireModal("lesson_change"); if(token==null)return;
+        LessonSchedule term=lessons();
+        LessonChangeDialog editor=new LessonChangeDialog(this,occurrence,term.start,term.end,periodCount(),restored,new LessonChangeDialog.Host(){
+            @Override public List<ScheduleConflicts.Hit> review(LessonSchedule.Change change) {
+                return ScheduleConflicts.find(Collections.singletonList(LessonSchedule.project(base,source,change)),personalEvents,periodTimes,true);
+            }
+            @Override public String save(LessonSchedule.Change change) {
+                Course latest=findCourseById(id); LessonSchedule current=lessons();
+                if(latest==null || !current.active(latest,source)) return getString(R.string.scope_removed);
+                if(change.target!=0 && (change.target<current.start || change.target>current.end))return getString(R.string.scope_outside);
+                if(change.target!=0 && (change.target!=occurrence.actualDate || change.first!=occurrence.period || change.last!=occurrence.endPeriod)) {
+                    Course moved=LessonSchedule.project(latest,source,change);
+                    for(Course other:courses) for(Course c:current.between(other,change.target,change.target))
+                        if((c.id!=id || c.sourceDate!=source) && periodsOverlap(c,moved)) return courseConflictMessage(c);
+                }
+                List<Course> candidate=copyCourses();
+                for(Course c:candidate) if(c.id==id){
+                    if(change.target==source && change.first==c.period && change.last==c.endPeriod && change.room.equals(c.room)) c.changes.remove(source);
+                    else c.changes.put(source,change);
+                }
+                if(!saveCourses(candidate)) return getString(R.string.main_save_failed_retry);
+                if(change.target!=0) browsePastelDate(ScheduleDay.millis(change.target)); else render();
+                Toast.makeText(MainActivity.this,R.string.main_changes_saved,Toast.LENGTH_SHORT).show();return null;
+            }
+        });
+        activeLessonChange=editor;
+        Runnable cleanup=beginSettingsDraft(editor::capture);
+        showOwnedSettingsDialog(token,editor.dialog,()->{cleanup.run();editor.closeChildren(); if(activeLessonChange==editor)activeLessonChange=null;},null); editor.opened(restored);
+    }
+
+    private List<ScheduleConflicts.Hit> eventConflicts(PersonalEvent candidate) {
+        if(courses.isEmpty())return null;
+        LessonSchedule term=lessons();
+        int from=candidate.repeat==0?ScheduleDay.of(candidate):term.start, to=candidate.repeat==0?from:term.end;
+        List<Course> lessons=new ArrayList<>();for(Course series:courses) lessons.addAll(term.between(series,from,to));
+        return ScheduleConflicts.find(lessons,Collections.singletonList(candidate),periodTimes,false);
+    }
+
     private void showPastelCourseDetail(Course course) {
         if (!mayOpenModal()) return;
         PastelCourseSheet.Detail detail = new PastelCourseSheet.Detail();
         detail.name = course.name;
-        detail.dayLabel = dayNames[clamp(course.day, 0, 6)];
+        detail.dayLabel = (course.actualDate==0?"":ScheduleDay.label(course.actualDate)+" · ")+dayNames[clamp(course.day, 0, 6)];
         detail.periodLabel = course.periodLabel();
         detail.time = periodRangeTime(course);
         detail.weeks = course.weeks;
@@ -2878,12 +3127,12 @@ public class MainActivity extends AppCompatActivity {
         final long id = course.id;
         PastelCourseSheet sheet = newModalSheet();
         activeCourseDetail = sheet;
-        activeCourseDetailId = id;
+        activeCourseDetailId = id; detailLessonDate=course.sourceDate;
         sheet.showDetail(detail, () -> {
             activeCourseDetail = null;
             activeCourseDetailId = 0;
             Course latest = findCourseById(id);
-            if (latest != null) showPastelCourseEditor(latest, latest.day, latest.period);
+            if (latest != null) chooseLessonEdit(course);
         }, () -> {
             if (activeCourseDetail == sheet) {
                 activeCourseDetail = null;
@@ -2958,6 +3207,12 @@ public class MainActivity extends AppCompatActivity {
         activeCourseId = isEditing ? id : 0;
         Bundle restored = pendingCourseRestore;
         pendingCourseRestore = null;
+        sheet.courseConflicts=d->{
+            if(personalEvents.isEmpty() || cleanField(d.name).isEmpty() || !TimetableRules.parseWeeks(cleanField(d.weeks)).valid) return null;
+            Course c=editing==null?new Course():editing.copy(); c.day=d.day;c.period=d.start;c.endPeriod=d.end;c.weeks=cleanField(d.weeks);c.invalidWeeks=false;
+            LessonSchedule term=lessons();
+            return ScheduleConflicts.find(term.between(c,term.start,term.end),personalEvents,periodTimes,true);
+        };
         sheet.showEditor(isEditing, draft, new ArrayList<>(periodTimes),
                 COURSE_COLORS, courseColorNames, calendarTotalWeeks(), currentTeachingWeek(),
                 d -> savePastelDraft(editing, id, d),
@@ -2987,6 +3242,10 @@ public class MainActivity extends AppCompatActivity {
         draft.room = cleanField(d.room);
         draft.teacher = cleanField(d.teacher);
         draft.color = safeColor(d.color);
+        if(!draft.changes.isEmpty()) {
+            LessonSchedule term=lessons();
+            for(java.util.Iterator<Integer> it=draft.changes.keySet().iterator();it.hasNext();) if(!term.active(draft,it.next())) it.remove();
+        }
         // Same rule as the classic editor: only a changed schedule needs a conflict check.
         if (isScheduleChanged(draft, editing)) {
             Course conflict = findCourseConflict(draft);
@@ -3419,6 +3678,7 @@ public class MainActivity extends AppCompatActivity {
     private void showSettingsDialogV2() {
         if (settingsOverlayVisible()) { settingsOverlay.requestFocus(); return; }
         if (!mayOpenModal() || activityRecreating) return;
+        cancelPendingDaySwipe();
         ViewGroup contentRoot = findViewById(android.R.id.content);
         if (contentRoot == null) return;
         UiSemanticPalette colors = semanticColors();
@@ -3617,7 +3877,7 @@ public class MainActivity extends AppCompatActivity {
         }
         ModalCoordinator.Token token = acquireModal("randomize_colors");
         if (token == null) return;
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+        AlertDialog dialog = SettingsDialogStyle.of(this).builder()
                 .setTitle(getString(R.string.main_randomize_colors))
                 .setMessage(getString(R.string.main_randomize_message))
                 .setNegativeButton(getString(R.string.action_cancel), null)
@@ -3630,7 +3890,7 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(this, getResources().getQuantityString(R.plurals.main_randomized_count, count, count), Toast.LENGTH_SHORT).show();
                 })
                 .create();
-        showOwnedDialog(token, dialog, true, null, null);
+        showOwnedSettingsDialog(token, dialog, null, null);
     }
 
     /** Registers a draft for state saving; run the returned cleanup when its window closes. */
@@ -3647,40 +3907,51 @@ public class MainActivity extends AppCompatActivity {
         Bundle restored = pendingSettingsRestore;
         pendingSettingsRestore = null;
         String current = restored != null ? restored.getString("font", AppFonts.current(this)) : AppFonts.current(this);
+        if (!AppFonts.available(this, current)) current = AppFonts.SYSTEM;
         int checked = 0;
         for (int i = 0; i < AppFonts.IDS.length; i++) if (AppFonts.IDS[i].equals(current)) checked = i;
         final int[] selected = {checked};
         final int currentPercent = AppFonts.sizePercent(this);
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(20), dp(4), dp(20), dp(12));
+        SettingsDialogStyle style = SettingsDialogStyle.of(this);
+        LinearLayout panel = style.body();
+        LinearLayout fontCard = style.group();
         RadioGroup fonts = new RadioGroup(this);
         fonts.setOrientation(RadioGroup.VERTICAL);
-        int[][] choiceStates = {{android.R.attr.state_checked}, {}};
+        int[][] choiceStates = {{-android.R.attr.state_enabled}, {android.R.attr.state_checked}, {}};
         ColorStateList radioTint = new ColorStateList(choiceStates,
-                new int[]{accentColor(), secondaryTextColor()});
+                new int[]{withAlpha(secondaryTextColor(), 130), accentColor(), secondaryTextColor()});
         for (int i = 0; i < AppFonts.IDS.length; i++) {
             RadioButton choice = new RadioButton(this);
             choice.setId(View.generateViewId());
-            choice.setText(AppFonts.label(this, i));
-            choice.setTextColor(primaryTextColor());
+            boolean available = AppFonts.available(this, AppFonts.IDS[i]);
+            choice.setText(available ? AppFonts.label(this, i)
+                    : getString(R.string.settings_font_unavailable, AppFonts.label(this, i)));
+            choice.setEnabled(available);
+            choice.setTextColor(available ? style.colors.text : style.colors.secondary);
+            choice.setTextSize(15);
+            choice.setPadding(dp(4), dp(8), dp(4), dp(8));
             choice.setButtonTintList(radioTint);
             choice.setMinHeight(dp(48));
             fonts.addView(choice, new RadioGroup.LayoutParams(-1, -2));
             if (i == checked) fonts.check(choice.getId());
         }
         // Install the choice listener below, once the preview updater is available.
-        panel.addView(fonts);
+        fontCard.addView(fonts);
+        panel.addView(fontCard, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout sizeCard = style.group();
+        LinearLayout.LayoutParams sizeCardParams = new LinearLayout.LayoutParams(-1, -2);
+        sizeCardParams.topMargin = dp(12);
+        panel.addView(sizeCard, sizeCardParams);
         TextView sizeLabel = new TextView(this);
         sizeLabel.setTextColor(primaryTextColor());
         sizeLabel.setTextSize(15);
-        sizeLabel.setPadding(0, dp(14), 0, dp(4));
-        panel.addView(sizeLabel);
+        sizeLabel.setPadding(0, 0, 0, dp(4));
+        sizeCard.addView(sizeLabel);
         TextView hint = new TextView(this);
         hint.setText(R.string.font_size_hint);
         hint.setTextSize(12);
         hint.setTextColor(secondaryTextColor());
-        panel.addView(hint);
+        sizeCard.addView(hint);
         SeekBar slider = new SeekBar(this);
         slider.setMax((FontSizeRules.MAX - FontSizeRules.MIN) / FontSizeRules.STEP);
         slider.setProgress(FontSizeRules.toProgress(restored == null ? currentPercent : restored.getInt("percent", currentPercent)));
@@ -3688,13 +3959,13 @@ public class MainActivity extends AppCompatActivity {
         slider.setProgressTintList(ColorStateList.valueOf(accentColor()));
         slider.setProgressBackgroundTintList(ColorStateList.valueOf(withAlpha(secondaryTextColor(), isDarkMode ? 76 : 56)));
         slider.setMinimumHeight(dp(48));
-        panel.addView(slider, new LinearLayout.LayoutParams(-1, dp(48)));
+        sizeCard.addView(slider, new LinearLayout.LayoutParams(-1, dp(48)));
         TextView preview = new TextView(this);
         preview.setText(R.string.font_size_preview);
         preview.setTextColor(primaryTextColor());
         preview.setPadding(dp(12), dp(12), dp(12), dp(12));
-        preview.setBackground(buttonBackground(glassControlColor(), dp(12)));
-        panel.addView(preview, new LinearLayout.LayoutParams(-1, -2));
+        preview.setBackground(buttonBackground(style.colors.inset, dp(12)));
+        sizeCard.addView(preview, new LinearLayout.LayoutParams(-1, -2));
         Runnable updatePreview = () -> {
             int percent = FontSizeRules.fromProgress(slider.getProgress());
             String label = getString(R.string.font_size_value, percent);
@@ -3706,7 +3977,7 @@ public class MainActivity extends AppCompatActivity {
         };
         fonts.setOnCheckedChangeListener((group, id) -> {
             int index = group.indexOfChild(group.findViewById(id));
-            if (index < 0 || index >= AppFonts.IDS.length) return;
+            if (index < 0 || index >= AppFonts.IDS.length || !AppFonts.available(this, AppFonts.IDS[index])) return;
             selected[0] = index;
             updatePreview.run();
         });
@@ -3716,15 +3987,10 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onStopTrackingTouch(SeekBar seekBar) { }
         });
         updatePreview.run();
-        ScrollView scroller = new ScrollView(this);
-        scroller.addView(panel);
-        // Bound the content so confirmation/cancel stay reachable in landscape or large text.
-        int height = Math.min(dp(410), Math.max(dp(100), getResources().getDisplayMetrics().heightPixels - dp(220)));
-        FrameLayout viewport = new FrameLayout(this);
-        viewport.addView(scroller, new FrameLayout.LayoutParams(-1, height));
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+        ScrollView scroller = style.scrollBody(panel);
+        AlertDialog dialog = SettingsDialogStyle.of(this).builder()
                 .setTitle(getString(R.string.main_font_title))
-                .setView(viewport)
+                .setView(scroller)
                 .setNegativeButton(getString(R.string.action_cancel), null)
                 .setNeutralButton(getString(R.string.main_reset_font_size), null)
                 .setPositiveButton(getString(R.string.action_ok), null)
@@ -3737,17 +4003,18 @@ public class MainActivity extends AppCompatActivity {
             return state;
         });
         try {
-            showOwnedDialog(token, dialog, true, draftCleanup, null);
+            showOwnedSettingsDialog(token, dialog, draftCleanup, null);
         } catch (RuntimeException failure) {
             draftCleanup.run();
             throw failure;
         }
+        updatePreview.run();
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v ->
                 slider.setProgress(FontSizeRules.toProgress(FontSizeRules.DEFAULT)));
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             String id = AppFonts.IDS[selected[0]];
             int percent = FontSizeRules.fromProgress(slider.getProgress());
-            if (id.equals(AppFonts.current(this)) && percent == currentPercent) {
+            if (id.equals(AppFonts.configured(this)) && percent == currentPercent) {
                 dialog.dismiss();
                 return;
             }
@@ -3771,7 +4038,7 @@ public class MainActivity extends AppCompatActivity {
         for (int i = 0; i < AppLanguage.IDS.length; i++) if (AppLanguage.IDS[i].equals(current)) checked = i;
         final int[] selected = {restored == null ? checked
                 : clamp(restored.getInt("selected", checked), 0, AppLanguage.IDS.length - 1)};
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+        AlertDialog dialog = SettingsDialogStyle.of(this).builder()
                 .setTitle(R.string.language_title)
                 .setSingleChoiceItems(AppLanguage.names(this), selected[0], (d, which) -> selected[0] = which)
                 .setNegativeButton(R.string.action_cancel, null)
@@ -3784,7 +4051,7 @@ public class MainActivity extends AppCompatActivity {
             return state;
         });
         try {
-            showOwnedDialog(token, dialog, true, draftCleanup, null);
+            showOwnedSettingsDialog(token, dialog, draftCleanup, null);
         } catch (RuntimeException failure) {
             draftCleanup.run();
             throw failure;
@@ -3832,7 +4099,7 @@ public class MainActivity extends AppCompatActivity {
                 : clamp(restored.getInt("selected", displayMode.ordinal()), 0, modes.length - 1)};
         String[] labels = new String[modes.length];
         for (int i = 0; i < modes.length; i++) labels[i] = displayModeLabel(modes[i]);
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+        AlertDialog dialog = SettingsDialogStyle.of(this).builder()
                 .setTitle(R.string.display_mode_title)
                 .setSingleChoiceItems(labels, selected[0], (d, which) -> selected[0] = which)
                 .setNegativeButton(R.string.action_cancel, null)
@@ -3845,7 +4112,7 @@ public class MainActivity extends AppCompatActivity {
             return state;
         });
         try {
-            showOwnedDialog(token, dialog, true, draftCleanup, null);
+            showOwnedSettingsDialog(token, dialog, draftCleanup, null);
         } catch (RuntimeException failure) {
             draftCleanup.run();
             throw failure;
@@ -3883,7 +4150,7 @@ public class MainActivity extends AppCompatActivity {
                 getString(R.string.main_theme_light),
                 getString(R.string.main_theme_dark)
         };
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+        AlertDialog dialog = SettingsDialogStyle.of(this).builder()
                 .setTitle(R.string.main_theme_mode_title)
                 .setSingleChoiceItems(options, selected[0], (d, which) -> selected[0] = which)
                 .setNegativeButton(R.string.action_cancel, null)
@@ -3896,7 +4163,7 @@ public class MainActivity extends AppCompatActivity {
             return state;
         });
         try {
-            showOwnedDialog(token, dialog, true, draftCleanup, null);
+            showOwnedSettingsDialog(token, dialog, draftCleanup, null);
         } catch (RuntimeException failure) {
             draftCleanup.run();
             throw failure;
@@ -3921,27 +4188,19 @@ public class MainActivity extends AppCompatActivity {
         Bundle restored = pendingSettingsRestore != null
                 && "accent".equals(pendingSettingsRestore.getString("kind")) ? pendingSettingsRestore : null;
         if (restored != null) pendingSettingsRestore = null;
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(4), dp(10), dp(4), dp(6));
+        SettingsDialogStyle style = SettingsDialogStyle.of(this);
+        LinearLayout panel = style.body();
         int[] selected = {restored == null ? accentPresetIndex()
                 : clamp(restored.getInt("selected", accentPresetIndex()), 0, ACCENT_PRESETS.length - 1)};
-        ScrollView scroller = new ScrollView(this);
-        scroller.setFillViewport(false);
-        int viewportHeight = Math.min(dp(420), Math.max(dp(100),
-                getResources().getDisplayMetrics().heightPixels - dp(260)));
-        FrameLayout viewport = new FrameLayout(this);
-        scroller.addView(panel);
-        viewport.addView(scroller, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, viewportHeight));
+        ScrollView scroller = style.scrollBody(panel);
 
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+        AlertDialog dialog = SettingsDialogStyle.of(this).builder()
                 .setTitle(getString(R.string.main_accent_title))
-                .setView(viewport)
+                .setView(scroller)
                 .setNegativeButton(getString(R.string.action_cancel), null)
                 .setPositiveButton(getString(R.string.action_ok), null)
                 .create();
-        renderAccentChoices(panel, selected, dialog);
+        renderAccentChoices(panel, selected);
         Runnable draftCleanup = beginSettingsDraft(() -> {
             Bundle state = new Bundle();
             state.putString("kind", "accent");
@@ -3966,7 +4225,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         try {
-            showOwnedDialog(token, dialog, true, draftCleanup, null);
+            showOwnedSettingsDialog(token, dialog, draftCleanup, null);
         } catch (RuntimeException failure) {
             draftCleanup.run();
             throw failure;
@@ -3976,7 +4235,7 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void renderAccentChoices(LinearLayout panel, int[] selected, AlertDialog dialog) {
+    private void renderAccentChoices(LinearLayout panel, int[] selected) {
         panel.removeAllViews();
         final int columns = getResources().getConfiguration().screenWidthDp < 360
                 || getResources().getConfiguration().fontScale > 1.25f ? 3 : 4;
@@ -3993,38 +4252,31 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
         gridParams.gravity = Gravity.CENTER_HORIZONTAL;
-        panel.addView(grid, gridParams);
+        LinearLayout paletteCard = SettingsDialogStyle.of(this).group();
+        paletteCard.setPadding(dp(4), dp(4), dp(4), dp(4));
+        paletteCard.addView(grid, gridParams);
+        panel.addView(paletteCard, new LinearLayout.LayoutParams(-1, -2));
 
         for (int i = 0; i < ACCENT_PRESETS.length; i++) {
             final int index = i;
-            int color = ACCENT_PRESETS[i][isDarkMode ? 1 : 0];
-            boolean isSelected = index == selected[0];
-
             LinearLayout cell = new LinearLayout(this);
             cell.setOrientation(LinearLayout.VERTICAL);
             cell.setGravity(Gravity.CENTER_HORIZONTAL);
             cell.setClickable(true);
             cell.setFocusable(true);
-            android.graphics.drawable.StateListDrawable cellBg = new android.graphics.drawable.StateListDrawable();
-            cellBg.addState(new int[]{android.R.attr.state_pressed},
-                    buttonBackground(withAlpha(accentColor(), isDarkMode ? 44 : 26), dp(14)));
-            cellBg.addState(new int[]{}, buttonBackground(Color.TRANSPARENT, dp(14)));
-            cell.setBackground(cellBg);
-            cell.setContentDescription(UiAccentPalette.name(index)
-                    + (isSelected ? getString(R.string.main_selected_short_suffix) : "")
-                    + getString(R.string.main_tap_to_select_suffix));
             cell.setOnClickListener(view -> {
+                int previous = selected[0];
+                if (previous == index) return;
                 selected[0] = index;
-                renderAccentChoices(panel, selected, dialog);
+                // Keep the actual focused/accessibility node and the scroll position alive.
+                updateAccentChoice((LinearLayout) grid.getChildAt(previous), previous, false);
+                updateAccentChoice(cell, index, true);
             });
 
             TextView swatch = new TextView(this);
-            swatch.setText(isSelected ? "\u2713" : "");
-            swatch.setTextColor(CoursePalette.readableInk(color));
             swatch.setTextSize(18);
             swatch.setTypeface(appTypeface(Typeface.BOLD));
             swatch.setGravity(Gravity.CENTER);
-            swatch.setBackground(swatchStateListBackground(color, isSelected));
             swatch.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             cell.addView(swatch, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
@@ -4033,8 +4285,6 @@ public class MainActivity extends AppCompatActivity {
             name.setTextSize(12);
             name.setMinLines(2);
             name.setMaxLines(2);
-            name.setTextColor(isSelected ? accentColor() : secondaryTextColor());
-            name.setTypeface(appTypeface(isSelected ? Typeface.BOLD : Typeface.NORMAL));
             name.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -4042,6 +4292,7 @@ public class MainActivity extends AppCompatActivity {
             );
             nameParams.topMargin = dp(5);
             cell.addView(name, nameParams);
+            updateAccentChoice(cell, index, index == selected[0]);
 
             GridLayout.LayoutParams cellParams = new GridLayout.LayoutParams(
                     GridLayout.spec(index / columns),
@@ -4051,6 +4302,29 @@ public class MainActivity extends AppCompatActivity {
             cellParams.setMargins(dp(4), dp(8), dp(4), dp(8));
             grid.addView(cell, cellParams);
         }
+    }
+
+    private void updateAccentChoice(LinearLayout cell, int index, boolean selected) {
+        int color = ACCENT_PRESETS[index][isDarkMode ? 1 : 0];
+        android.graphics.drawable.StateListDrawable background = new android.graphics.drawable.StateListDrawable();
+        background.addState(new int[]{android.R.attr.state_pressed},
+                buttonBackground(withAlpha(accentColor(), isDarkMode ? 44 : 26), dp(14)));
+        background.addState(new int[]{android.R.attr.state_focused},
+                roundedSurface(semanticColors().inset, dp(14), accentColor()));
+        background.addState(new int[]{},
+                buttonBackground(selected ? semanticColors().inset : Color.TRANSPARENT, dp(14)));
+        cell.setBackground(background);
+        cell.setSelected(selected);
+        cell.setContentDescription(UiAccentPalette.name(index)
+                + (selected ? getString(R.string.main_selected_short_suffix) : "")
+                + getString(R.string.main_tap_to_select_suffix));
+        TextView swatch = (TextView) cell.getChildAt(0);
+        swatch.setText(selected ? "\u2713" : "");
+        swatch.setTextColor(CoursePalette.readableInk(color));
+        swatch.setBackground(swatchStateListBackground(color, selected));
+        TextView name = (TextView) cell.getChildAt(1);
+        name.setTextColor(selected ? accentColor() : secondaryTextColor());
+        name.setTypeface(appTypeface(selected ? Typeface.BOLD : Typeface.NORMAL));
     }
 
     private UiSemanticPalette semanticColors() {
@@ -4309,35 +4583,40 @@ public class MainActivity extends AppCompatActivity {
         List<String> draft = restoredRules == null ? new ArrayList<>(periodTimes) : new ArrayList<>(restoredRules);
         pendingPeriodRuleRestore = restored == null ? null : restored.getBundle("rule_editor");
 
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(4), dp(8), dp(4), 0);
+        SettingsDialogStyle style = SettingsDialogStyle.of(this);
+        LinearLayout panel = style.body();
+        TextView hint = style.caption(getString(R.string.main_period_rules_hint));
+        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2);
+        hintParams.bottomMargin = dp(12);
+        panel.addView(hint, hintParams);
 
-        TextView hint = label(getString(R.string.main_period_rules_hint));
-        panel.addView(hint);
+        Button addRule = new Button(this);
+        addRule.setTag("settings:period_add");
+        addRule.setText(R.string.main_add_period_rule);
+        style.action(addRule, false);
+        panel.addView(addRule, new LinearLayout.LayoutParams(-1, -2));
 
-        ScrollView scrollView = new ScrollView(this);
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
-        scrollView.addView(list);
-        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0
-        );
-        scrollParams.weight = 1f;
-        panel.addView(scrollView, scrollParams);
+        LinearLayout list = style.group();
+        list.setTag("settings:period_list");
+        list.setPadding(0, 0, 0, 0);
+        list.setClipToOutline(true);
+        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(-1, -2);
+        listParams.topMargin = dp(12);
+        panel.addView(list, listParams);
 
-        Button addRule = settingsActionButton(getString(R.string.main_add_period_rule), accentColor());
-        LinearLayout.LayoutParams addRuleParams = fieldParams();
-        addRuleParams.topMargin = dp(12);
-        panel.addView(addRule, addRuleParams);
+        Button resetDefault = new Button(this);
+        resetDefault.setTag("settings:period_reset");
+        resetDefault.setText(getString(R.string.main_reset_periods, DEFAULT_PERIOD_TIMES.length));
+        style.action(resetDefault, false);
+        resetDefault.setTextColor(style.colors.secondary);
+        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(-1, -2);
+        resetParams.topMargin = dp(12);
+        panel.addView(resetDefault, resetParams);
+        ScrollView scrollView = style.scrollBody(panel);
 
-        Button resetDefault = settingsActionButton(getString(R.string.main_reset_periods, DEFAULT_PERIOD_TIMES.length), secondaryTextColor());
-        panel.addView(resetDefault, fieldParams());
-
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+        AlertDialog dialog = SettingsDialogStyle.of(this).builder()
                 .setTitle(getString(R.string.main_period_settings))
-                .setView(panel)
+                .setView(scrollView)
                 .setNegativeButton(getString(R.string.action_cancel), null)
                 .setPositiveButton(getString(R.string.action_save), null)
                 .create();
@@ -4390,13 +4669,14 @@ public class MainActivity extends AppCompatActivity {
             Bundle state = new Bundle();
             state.putString("kind", "periods");
             state.putStringArrayList("rules", new ArrayList<>(draft));
+            state.putInt("scroll", scrollView.getScrollY());
             if (periodRuleDraftCapture != null) state.putBundle("rule_editor", periodRuleDraftCapture.capture());
             else if (pendingPeriodRuleRestore != null) state.putBundle("rule_editor", pendingPeriodRuleRestore);
             return state;
         });
         // The per-period editor is a dependent child of this window, like an editor's discard prompt.
         try {
-            showOwnedDialog(token, dialog, true, () -> {
+            showOwnedSettingsDialog(token, dialog, () -> {
                 draftCleanup.run();
                 if (activePeriodRuleDialog != null) activePeriodRuleDialog.dismiss();
                 // Cancel/back means cancel this import, never loop the shortage prompt.
@@ -4406,6 +4686,7 @@ public class MainActivity extends AppCompatActivity {
             draftCleanup.run();
             throw failure;
         }
+        if (restored != null) scrollView.post(() -> scrollView.scrollTo(0, Math.max(0, restored.getInt("scroll", 0))));
         if (pendingPeriodRuleRestore != null) {
             int index = pendingPeriodRuleRestore.getInt("index", -1);
             if (index >= -1 && index < draft.size()) showPeriodRuleDialog(draft, index, refresh[0]);
@@ -4500,10 +4781,20 @@ public class MainActivity extends AppCompatActivity {
         list.removeAllViews();
         for (int i = 0; i < draft.size(); i++) {
             final int index = i;
-            Button row = settingsActionButton(getString(R.string.main_period_with_time, i + 1, draft.get(i)), primaryTextColor());
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setOnClickListener(view -> showPeriodRuleDialog(draft, index, refresh));
-            list.addView(row, fieldParams());
+            if (i > 0) {
+                View divider = new View(this);
+                divider.setBackgroundColor(semanticColors().divider);
+                divider.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                LinearLayout.LayoutParams rule = new LinearLayout.LayoutParams(-1,
+                        Math.max(1, Math.round(.5f * getResources().getDisplayMetrics().density)));
+                rule.setMargins(dp(44), 0, dp(12), 0);
+                list.addView(divider, rule);
+            }
+            View row = settingsMenuRow(R.drawable.ic_clock_outline,
+                    getString(R.string.main_period_n, i + 1), draft.get(i), semanticColors().secondary,
+                    view -> showPeriodRuleDialog(draft, index, refresh));
+            row.setTag("settings:period:" + i);
+            list.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }
     }
 
@@ -4516,30 +4807,52 @@ public class MainActivity extends AppCompatActivity {
         String value = editing ? draft.get(index) : suggestedNextPeriodTime(draft);
         String[] parts = value.split("-");
 
-        LinearLayout form = new LinearLayout(this);
-        form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(4), dp(8), dp(4), 0);
+        SettingsDialogStyle style = SettingsDialogStyle.of(this);
+        LinearLayout form = style.body();
+        LinearLayout fields = style.group();
+        form.addView(fields, new LinearLayout.LayoutParams(-1, -2));
 
         EditText startInput = input("HH:mm", parts.length == 2 ? parts[0] : "");
         EditText endInput = input("HH:mm", parts.length == 2 ? parts[1] : "");
+        startInput.setTag("settings:period_start");
+        endInput.setTag("settings:period_end");
+        configurePeriodTimeInput(startInput, endInput, android.view.inputmethod.EditorInfo.IME_ACTION_NEXT);
+        configurePeriodTimeInput(endInput, startInput, android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        startInput.setNextFocusForwardId(endInput.getId());
+        style.field(startInput);
+        style.field(endInput);
         if (restored != null) {
             startInput.setText(restored.getString("start", startInput.getText().toString()));
             endInput.setText(restored.getString("end", endInput.getText().toString()));
         }
-        form.addView(label(getString(R.string.main_label_start_time)));
-        form.addView(startInput, fieldParams());
-        form.addView(label(getString(R.string.main_label_end_time)));
-        form.addView(endInput, fieldParams());
+        TextView startLabel = style.heading(getString(R.string.main_label_start_time));
+        startLabel.setLabelFor(startInput.getId());
+        fields.addView(startLabel);
+        fields.addView(startInput, fieldParams());
+        TextView endLabel = style.heading(getString(R.string.main_label_end_time));
+        endLabel.setLabelFor(endInput.getId());
+        fields.addView(endLabel);
+        fields.addView(endInput, fieldParams());
 
-        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
+        MaterialAlertDialogBuilder builder = style.builder()
                 .setTitle(editing ? getString(R.string.main_period_n, index + 1) : getString(R.string.main_add_period_rule))
-                .setView(form)
+                .setView(style.scrollBody(form))
                 .setNegativeButton(getString(R.string.action_cancel), null)
                 .setPositiveButton(getString(R.string.action_save), null);
         if (editing && draft.size() > 1) {
             builder.setNeutralButton(getString(R.string.action_delete), null);
         }
         AlertDialog dialog = builder.create();
+        startInput.setOnEditorActionListener((view, action, event) -> {
+            if (action != android.view.inputmethod.EditorInfo.IME_ACTION_NEXT) return false;
+            endInput.requestFocus();
+            return true;
+        });
+        endInput.setOnEditorActionListener((view, action, event) -> {
+            if (action != android.view.inputmethod.EditorInfo.IME_ACTION_DONE) return false;
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+            return true;
+        });
         dialog.setOnShowListener(d -> {
             Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
             save.setOnClickListener(view -> {
@@ -4559,7 +4872,7 @@ public class MainActivity extends AppCompatActivity {
             if (delete != null) {
                 delete.setOnClickListener(view -> {
                     int highestUsed = 0;
-                    for (Course course : courses) if (!course.temporary) highestUsed = Math.max(highestUsed, course.endPeriod);
+                    for (Course course : courses) if (!course.temporary) highestUsed = Math.max(highestUsed, usedPeriods(course));
                     if (!PeriodEditRules.canDelete(index, draft.size(), highestUsed)) {
                         Toast.makeText(this, getString(R.string.main_period_delete_blocked), Toast.LENGTH_LONG).show();
                         return;
@@ -4575,6 +4888,14 @@ public class MainActivity extends AppCompatActivity {
             state.putInt("index", index);
             state.putString("start", startInput.getText().toString());
             state.putString("end", endInput.getText().toString());
+            EditText[] inputs = {startInput, endInput};
+            state.putInt("focused_input", -1);
+            for (int i = 0; i < inputs.length; i++) {
+                if (inputs[i].hasFocus()) state.putInt("focused_input", i);
+                state.putInt("selection_start_" + i, inputs[i].getSelectionStart());
+                state.putInt("selection_end_" + i, inputs[i].getSelectionEnd());
+                state.putCharSequence("error_" + i, inputs[i].getError());
+            }
             return state;
         };
         periodRuleDraftCapture = capture;
@@ -4584,23 +4905,61 @@ public class MainActivity extends AppCompatActivity {
             if (activePeriodRuleDialog == dialog) activePeriodRuleDialog = null;
         });
         dialog.show();
-        styleDialogWindow(dialog);
+        style.apply(dialog);
+        if (restored != null) {
+            EditText[] inputs = {startInput, endInput};
+            int focused = restored.getInt("focused_input", -1);
+            if (focused >= 0 && focused < inputs.length) inputs[focused].requestFocus();
+            for (int i = 0; i < inputs.length; i++) {
+                int start = restored.getInt("selection_start_" + i, -1);
+                int end = restored.getInt("selection_end_" + i, -1);
+                if (start >= 0 && end >= 0)
+                    inputs[i].setSelection(Math.min(start, inputs[i].length()), Math.min(end, inputs[i].length()));
+                inputs[i].setError(restored.getCharSequence("error_" + i));
+            }
+        }
         Button deleteBtn = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
         if (deleteBtn != null) deleteBtn.setTextColor(dangerColor());
     }
 
     private String periodRangeFromInputs(EditText startInput, EditText endInput) {
+        startInput.setError(null);
+        endInput.setError(null);
         String start = normalizeClock(startInput.getText().toString());
         String end = normalizeClock(endInput.getText().toString());
-        if (start == null || end == null) {
-            Toast.makeText(this, getString(R.string.main_time_format), Toast.LENGTH_SHORT).show();
+        if (start == null) {
+            startInput.setError(getString(R.string.main_time_format));
+            startInput.requestFocus();
+            return null;
+        }
+        if (end == null) {
+            endInput.setError(getString(R.string.main_time_format));
+            endInput.requestFocus();
             return null;
         }
         if (clockMinutes(end) <= clockMinutes(start)) {
-            Toast.makeText(this, getString(R.string.main_end_after_start), Toast.LENGTH_SHORT).show();
+            endInput.setError(getString(R.string.main_end_after_start));
+            endInput.requestFocus();
             return null;
         }
         return start + "-" + end;
+    }
+
+    private void configurePeriodTimeInput(EditText input, EditText pairedInput, int action) {
+        input.setId(View.generateViewId());
+        // Advertise a time keyboard while retaining unfinished/raw draft text for validation.
+        input.setRawInputType(android.text.InputType.TYPE_CLASS_DATETIME
+                | android.text.InputType.TYPE_DATETIME_VARIATION_TIME);
+        input.setImeOptions(action);
+        input.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            @Override public void afterTextChanged(android.text.Editable text) {
+                // Range errors depend on both values; a new edit invalidates the previous validation.
+                if (input.getError() != null) input.setError(null);
+                if (pairedInput.getError() != null) pairedInput.setError(null);
+            }
+        });
     }
 
     private String normalizeClock(String raw) {
@@ -4664,11 +5023,16 @@ public class MainActivity extends AppCompatActivity {
         return null;
     }
 
+    private int usedPeriods(Course course) {
+        int used=course.endPeriod;
+        for(LessonSchedule.Change ch:course.changes.values()) if(ch.target!=0) used=Math.max(used,ch.last);
+        return used;
+    }
     private int maxUsedPeriod() {
         int max = 1;
         for (Course course : courses) {
             if (!course.temporary) {
-                max = Math.max(max, course.endPeriod);
+                max = Math.max(max, usedPeriods(course));
             }
         }
         return max;
@@ -4899,15 +5263,19 @@ public class MainActivity extends AppCompatActivity {
     private void confirmDeleteCurrentConfiguration() {
         ModalCoordinator.Token token = acquireModal("delete_config");
         if (token == null) return;
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+        AlertDialog dialog = SettingsDialogStyle.of(this).builder()
                 .setTitle(getString(R.string.main_delete_config))
                 .setMessage(getString(R.string.main_delete_config_message))
                 .setNegativeButton(getString(R.string.action_cancel), null)
                 .setPositiveButton(getString(R.string.action_delete), (d, which) -> deleteCurrentConfiguration())
                 .create();
-        showOwnedDialog(token, dialog, true, null, null);
+        showOwnedSettingsDialog(token, dialog, null, null);
         Button deletePositive = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-        if (deletePositive != null) deletePositive.setTextColor(dangerColor());
+        if (deletePositive != null) {
+            UiSemanticPalette colors = semanticColors();
+            deletePositive.setBackground(rippleBackground(colors.errorContainer, withAlpha(colors.error, 28), dp(12), Color.TRANSPARENT));
+            deletePositive.setTextColor(colors.onErrorContainer);
+        }
     }
 
     private void deleteCurrentConfiguration() {
@@ -4969,7 +5337,7 @@ public class MainActivity extends AppCompatActivity {
         Bundle restored = pendingPasteRestore;
         pendingPasteRestore = null;
         sheet.showPasteImport(
-                TextTimetableParser.FORMAT_HINT, TextTimetableParser.EXAMPLE, text -> {
+                TextTimetableParser.formatHint(), TextTimetableParser.example(), text -> {
                     TextTimetableParser.Result result = TextTimetableParser.parse(text, MAX_PERIODS, MAX_COURSES);
                     if (result.courses.isEmpty()) {
                         return joinImportErrors(result.errors);
@@ -4980,6 +5348,8 @@ public class MainActivity extends AppCompatActivity {
                                 result.errors.size(), result.errors.size(), joinImportErrors(result.errors));
                     }
                     cancelPdfImport(); // a prior PDF worker must not replace this accepted text
+                    // Accepted text is now a review, even while the sheet is finishing its close animation.
+                    if (activePasteImport == sheet) activePasteImport = null;
                     importFlow = new ImportFlowState(result.courses, getString(R.string.main_pasted_text_source), null);
                     return null;
                 }, restored, () -> {
@@ -5044,7 +5414,7 @@ public class MainActivity extends AppCompatActivity {
                 input(getString(R.string.sheet_pick_date), draft.start),
                 input(getString(R.string.sheet_pick_date), draft.end),
                 label(getString(R.string.main_label_term_start)), label(getString(R.string.main_label_term_end)),
-                calendarStartMillis(), calendarEndMillis(), (start, end) -> {
+                (start, end) -> {
                     if (!saveAcademicCalendar(getString(R.string.main_calendar_manual_name), start, end)) return false;
                     if (importFlow != null && importFlow.stage() == ImportFlowState.Stage.CALENDAR) {
                         importFlow.finish();
@@ -5053,7 +5423,7 @@ public class MainActivity extends AppCompatActivity {
                     return true;
                 });
         calendarEditor = editor;
-        showOwnedDialog(token, editor.dialog, true, () -> {
+        showOwnedDialog(token, editor.dialog, false, () -> {
             editor.closeChild();
             if (calendarEditor == editor) calendarEditor = null;
             if (!destroyingActivity && calendarDraft == draft) calendarDraft = null;
@@ -5486,8 +5856,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private Course findCourseConflict(Course draft) {
+        LessonSchedule term=null; List<Course> targets=null;
         for (Course course : courses) {
-            if (course.temporary || course.id == draft.id || course.day != draft.day) {
+            if(course.temporary || course.id==draft.id) continue;
+            if(!course.changes.isEmpty() || !draft.changes.isEmpty()) {
+                if(term==null){term=lessons();targets=term.between(draft,term.start,term.end);}
+                for(Course other:term.between(course,term.start,term.end)) for(Course c:targets)
+                    if(c.actualDate==other.actualDate && periodsOverlap(c,other))return other;
+                continue;
+            }
+            if (course.day != draft.day) {
                 continue;
             }
             if (periodsOverlap(course, draft) && weeksOverlap(course.weeks, draft.weeks)) {
@@ -5544,9 +5922,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean courseOccursInTeachingWeek(Course course, int week) {
-        if (course.temporary) {
-            return true;
-        }
+        if (course.temporary) return true;
+        if (course.actualDate!=0) return week==AgendaDates.week(calendarStartMillis(),ScheduleDay.millis(course.actualDate));
         if (week <= 0 || week > calendarTotalWeeks()) {
             return false;
         }
@@ -5652,33 +6029,25 @@ public class MainActivity extends AppCompatActivity {
         Course next = null;
         long nextStartAt = Long.MAX_VALUE;
         int totalWeeks = Math.min(calendarTotalWeeks(), TimetableRules.MAX_WEEK);
-        for (Course course : courses) {
-            if (course.invalidWeeks) {
+        LessonSchedule term=lessons(); int today=ScheduleDay.at(now);
+        for(Course series:courses) {
+            if(series.invalidWeeks) continue;
+            if(series.temporary && series.day!=currentSchoolDay()) continue;
+            if(!series.temporary && series.changes.isEmpty()) {
+                // Find the next active teaching week without materializing a semester of cards.
+                for(int w=Math.max(1,currentTeachingWeek());w<=totalWeeks;w++) {
+                    if(!courseOccursInTeachingWeek(series,w)) continue;
+                    long date=courseDateMillisForWeek(series.day,w), at=timeOnDateMillis(date,courseStartMinutes(series));
+                    if(at<=now) continue;
+                    if(at<nextStartAt) {next=LessonSchedule.project(series,ScheduleDay.at(date),null); nextStartAt=at;}
+                    break;
+                }
                 continue;
             }
-            if (course.temporary) {
-                if (course.day != currentSchoolDay()) {
-                    continue;
-                }
-                long startAt = timeOnDateMillis(startOfTodayMillis(), courseStartMinutes(course));
-                if (startAt > now && startAt < nextStartAt) {
-                    next = course;
-                    nextStartAt = startAt;
-                }
-                continue;
-            }
-            for (int week = 1; week <= totalWeeks; week++) {
-                if (!courseOccursInTeachingWeek(course, week)) {
-                    continue;
-                }
-                long startAt = timeOnDateMillis(
-                        courseDateMillisForWeek(course.day, week),
-                        courseStartMinutes(course)
-                );
-                if (startAt > now && startAt < nextStartAt) {
-                    next = course;
-                    nextStartAt = startAt;
-                }
+            List<Course> candidates=series.temporary?Collections.singletonList(series):term.between(series,today,term.end);
+            for(Course c:candidates) {
+                long at=ScheduleDay.time(c.temporary?today:c.actualDate,courseStartMinutes(c));
+                if(at>now && at<nextStartAt) {next=c;nextStartAt=at;}
             }
         }
         return next == null ? null : new SummaryCourse(next, next.day, nextStartAt);
@@ -5686,7 +6055,8 @@ public class MainActivity extends AppCompatActivity {
 
     private Course currentCourseInProgress() {
         Course current = null;
-        for (Course course : courses) {
+        int today=ScheduleDay.at(System.currentTimeMillis()); LessonSchedule term=lessons();
+        for(Course base:courses) for(Course course:base.temporary?Collections.singletonList(base):term.between(base,today,today)) {
             if (courseTemporalState(course) != TimetableRules.TemporalState.IN_PROGRESS) {
                 continue;
             }
@@ -6094,6 +6464,7 @@ public class MainActivity extends AppCompatActivity {
                 object.put("room", course.room);
                 object.put("teacher", course.teacher);
                 object.put("color", course.color);
+                StoredTimetableSnapshot.writeLessonChanges(object,course);
                 array.put(object);
             }
         } catch (Exception ignored) {
@@ -6147,19 +6518,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             JSONArray array = new JSONArray();
             for (PersonalEvent e : snapshot) {
-                JSONObject o = new JSONObject();
-                o.put("id", e.id);
-                o.put("year", e.year);
-                o.put("month", e.month);
-                o.put("day", e.day);
-                o.put("start", e.startMinutes);
-                o.put("end", e.endMinutes);
-                o.put("remind", e.remindMinutes);
-                o.put("title", e.title);
-                o.put("location", e.location);
-                o.put("note", e.note);
-                o.put("showInTimetable", e.showInTimetable);
-                array.put(o);
+                array.put(StoredTimetableSnapshot.writeEvent(e));
             }
             String encrypted = secureStorage.encrypt(array.toString());
             return SafePreferences.commit(getSharedPreferences(PREFS_NAME, MODE_PRIVATE),
@@ -6180,6 +6539,11 @@ public class MainActivity extends AppCompatActivity {
         scheduleClassReminderNotifications();
         render();
         return null;
+    }
+
+    private PersonalEvent eventAt(long id,int date) {
+        PersonalEvent base=findPersonalEvent(id);
+        return base==null || date==0 ? base : EventSeries.occurrence(base,date);
     }
 
     private PersonalEvent findPersonalEvent(long id) {
@@ -6203,13 +6567,14 @@ public class MainActivity extends AppCompatActivity {
             labels[day] = dates[day] > 0 ? format.format(new java.util.Date(dates[day])) : null;
         }
         List<PastelTimetableView.EventEntry> visible = new ArrayList<>();
-        for (PersonalEvent e : personalEvents) {
+        shownEvents.clear();
+        for(PersonalEvent series:personalEvents) for(PersonalEvent e:EventSeries.between(series,ScheduleDay.at(dates[0]),ScheduleDay.at(dates[6]))) {
             if (!displayMode.showsEvents() || !e.showInTimetable) continue;
             long date = e.dayMillis();
             for (int day = 0; day < 7; day++) {
                 if (dates[day] == date) {
                     PastelTimetableView.EventEntry entry = new PastelTimetableView.EventEntry();
-                    entry.id = e.id;
+                    entry.id = eventHandle(e);
                     entry.day = day;
                     entry.startMinutes = e.startMinutes;
                     entry.endMinutes = e.endMinutes;
@@ -6232,14 +6597,15 @@ public class MainActivity extends AppCompatActivity {
         if (eventFromMine && pastelTimetable != null) pastelTimetable.setMineSelected(true);
         PastelCourseSheet sheet = newModalSheet();
         activeEventDetail = sheet;
-        activeEventDetailId = event.id;
+        activeEventDetailId = event.id; detailEventDate=event.sourceDate;
         Bundle restored = pendingDetailRestore;
         pendingDetailRestore = null;
         sheet.showEventDetail(event, System.currentTimeMillis(), () -> {
             activeEventDetail = null;
             activeEventDetailId = 0;
             PersonalEvent latest = findPersonalEvent(event.id);
-            if (latest != null) showPersonalEventEditor(latest);
+            if (latest != null && latest.repeat!=0 && event.sourceDate!=0) showChangeScope(true,latest.id,event.sourceDate);
+            else if (latest != null) showPersonalEventEditor(latest);
             else if (eventFromMine) showMineSheet();
         }, () -> {
             if (activeEventDetail == sheet) {
@@ -6298,9 +6664,10 @@ public class MainActivity extends AppCompatActivity {
         }
         PastelCourseSheet sheet = newModalSheet();
         activeEventEditor = sheet;
-        activeEventId = editing == null ? 0 : editing.id;
+        activeEventId = editing == null ? 0 : editing.id; editEventDate=draft.sourceDate;
         Bundle restored = pendingEventRestore;
         pendingEventRestore = null;
+        sheet.eventConflicts=this::eventConflicts;
         sheet.showEventEditor(editing != null, draft, candidate -> {
             List<PersonalEvent> next = new ArrayList<>(personalEvents);
             if (editing == null) {
@@ -6318,7 +6685,16 @@ public class MainActivity extends AppCompatActivity {
                 for (int i = 0; i < next.size(); i++) {
                     if (next.get(i).id == editing.id) {
                         candidate.id = editing.id;
-                        next.set(i, candidate);
+                        if(editing.sourceDate!=0) {
+                            PersonalEvent series=next.get(i).copy();
+                            if(!EventSeries.scheduled(series,editing.sourceDate)) return getString(R.string.scope_removed);
+                            series.changes.put(editing.sourceDate,candidate.copyFields()); next.set(i,series);
+                        } else {
+                            if(candidate.repeat==0) candidate.changes.clear();
+                            else for(java.util.Iterator<Integer> it=candidate.changes.keySet().iterator();it.hasNext();)
+                                if(!EventSeries.scheduled(candidate,it.next())) it.remove();
+                            next.set(i, candidate);
+                        }
                         replaced = true;
                         break;
                     }
@@ -6338,10 +6714,10 @@ public class MainActivity extends AppCompatActivity {
             return error;
         }, editing == null ? null : () -> {
             List<PersonalEvent> next = new ArrayList<>(personalEvents);
-            for (java.util.Iterator<PersonalEvent> it = next.iterator(); it.hasNext(); ) {
-                if (it.next().id == editing.id) {
-                    it.remove();
-                }
+            for(int i=0;i<next.size();i++) if(next.get(i).id==editing.id) {
+                if(editing.sourceDate==0) next.remove(i);
+                else { PersonalEvent series=next.get(i).copy(); series.changes.put(editing.sourceDate,null); next.set(i,series); }
+                break;
             }
             String error = savePersonalEvents(next);
             Toast.makeText(this, error == null ? getString(R.string.main_event_deleted) : error, Toast.LENGTH_SHORT).show();
@@ -6364,7 +6740,17 @@ public class MainActivity extends AppCompatActivity {
     private void refreshMinePage() {
         if (minePage == null) return;
         minePage.setDisplayMode(displayMode);
-        minePage.setEvents(displayMode.showsEvents() ? new ArrayList<>(personalEvents) : Collections.emptyList());
+        List<PersonalEvent> rows=new ArrayList<>();
+        long now = System.currentTimeMillis();
+        nextMineOccurrenceRefresh = Long.MAX_VALUE;
+        if(displayMode.showsEvents()) for(PersonalEvent series:personalEvents) {
+            PersonalEvent occurrence = EventSeries.representative(series, now);
+            if (series.repeat != EventSeries.ONCE && occurrence != null && !occurrence.isPast(now)) {
+                nextMineOccurrenceRefresh = Math.min(nextMineOccurrenceRefresh, occurrence.endMillis());
+            }
+            rows.add(occurrence==null?series:occurrence);
+        }
+        minePage.setEvents(rows);
     }
 
     private String cleanField(String value) {

@@ -37,7 +37,7 @@ public class ThemeModeFlowTest {
     @Test public void closingOrFailingToShowReleasesDraftCapture() throws Exception {
         String dialog = themeDialog();
         assertTrue(dialog.contains("Runnable draftCleanup = beginSettingsDraft("));
-        assertTrue(dialog.contains("showOwnedDialog(token, dialog, true, draftCleanup, null)"));
+        assertTrue(dialog.contains("showOwnedSettingsDialog(token, dialog, draftCleanup, null)"));
         assertTrue(dialog.contains("catch (RuntimeException failure)"));
         assertTrue(dialog.contains("draftCleanup.run();"));
         assertTrue(dialog.indexOf("if (token == null) return;")

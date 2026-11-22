@@ -94,8 +94,8 @@
   <string name="sheet_example">Example</string>
   <string name="sheet_example_copied">Example copied</string>
   <string name="sheet_go_back_edit">Go back</string>
-  <string name="sheet_import_paste_sub">If your PDF can\'t be read, format it like the example and paste it</string>
-  <string name="sheet_import_pdf_sub">PDF, or XLSX, CSV, TSV and TXT lists with one course per row</string>
+  <string name="sheet_import_paste_sub">Paste a course list or a grid with weekday headings and period numbers</string>
+  <string name="sheet_import_pdf_sub">PDF timetables, plus course lists or weekly grids in XLSX, CSV, TSV or TXT</string>
   <string name="sheet_import_title">Import timetable</string>
   <string name="sheet_label_with_sub">%1$s, %2$s</string>
   <string name="sheet_location">Location</string>
@@ -118,7 +118,7 @@
   <string name="sheet_paste_clipboard">Paste from clipboard</string>
   <string name="sheet_paste_input_desc">Timetable text input</string>
   <string name="sheet_paste_input_hint">Paste your formatted timetable here</string>
-  <string name="sheet_paste_intro">One course per line, fields separated by | (Tab also works, handy when copying from a spreadsheet). Weeks, location and teacher are optional; empty weeks means every week.</string>
+  <string name="sheet_paste_intro">For a list, enter one course per line using | or Tab. You can also copy a weekly grid: weekdays across the top and periods (such as 1–2) down the first column. Empty weeks mean every week.</string>
   <string name="sheet_paste_rules" tools:ignore="TypographyDashes">Day: Mon–Sun, 周一~周日, 星期一 or 1–7\nPeriods: 1-2, 3, 第9-10节\nWeeks: 1-16周, 1-16周单周 (odd), 2-16周双周 (even), 1-8周,10-16周</string>
   <string name="sheet_paste_title">Paste timetable text</string>
   <string name="sheet_period_chip_desc">%1$s period %2$d</string>

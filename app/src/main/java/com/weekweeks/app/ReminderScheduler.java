@@ -2,6 +2,8 @@ package com.weekweeks.app;
 
 import android.annotation.SuppressLint;
 import android.app.AlarmManager;
+import android.app.ActivityManager;
+import android.app.ApplicationExitInfo;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
@@ -29,6 +31,9 @@ final class ReminderScheduler {
     private static final String STORE_KEY = "class_reminder_schedule_encrypted_v1";
     private static final String LAST_SUBMISSION_OK_KEY = "class_reminder_last_submission_ok";
     private static final String LAST_SUBMISSION_AT_KEY = "class_reminder_last_submission_at";
+    private static final String SUBMITTED_GENERATION_KEY = "class_reminder_submitted_generation";
+    private static final String SUBMITTED_EXACT_KEY = "class_reminder_submitted_exact";
+    private static final String SUBMITTED_AT_KEY = "class_reminder_submitted_at";
     private static final String KEY_ALIAS = "week_weeks_reminder_schedule_key";
     private static final SecureStorage STORAGE = new SecureStorage(KEY_ALIAS);
 
@@ -42,8 +47,62 @@ final class ReminderScheduler {
     /** A locked data store is unknown, not empty: retain its last readable reminder plan. */
     static void replaceSchedule(Context context, List<Entry> entries,
             boolean coursesReadable, boolean eventsReadable) {
-        if (!coursesReadable && !eventsReadable) return;
+        replaceSchedule(context, entries, coursesReadable, eventsReadable,
+                ReminderSourceRebuilder.sourceFingerprint(context), loadSchedule(context));
+    }
+
+    /** A foreground refresh must not revoke an unchanged alarm awaiting delayed delivery. */
+    static void refreshSchedule(Context context, List<Entry> entries,
+            boolean coursesReadable, boolean eventsReadable) {
+        if (!notificationsEnabled(context)) return;
+        String fingerprint = ReminderSourceRebuilder.sourceFingerprint(context);
         ScheduleData previous = loadSchedule(context);
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        if (coursesReadable && eventsReadable && fingerprint != null
+                && fingerprint.equals(previous.sourceFingerprint) && previous.generation > 0
+                && prefs.getLong(SUBMITTED_GENERATION_KEY, Long.MIN_VALUE) == previous.generation
+                && prefs.getBoolean(LAST_SUBMISSION_OK_KEY, false)
+                && prefs.getBoolean(SUBMITTED_EXACT_KEY, false) == canScheduleExactAlarms(context)
+                && systemScheduleRetained(context, previous, prefs.getLong(SUBMITTED_AT_KEY, 0L))) {
+            return;
+        }
+        replaceSchedule(context, entries, coursesReadable, eventsReadable, fingerprint, previous);
+    }
+
+    /** Stored receipts survive force-stop even though the system removes the app's alarms. */
+    private static boolean systemScheduleRetained(Context context, ScheduleData schedule, long submittedAt) {
+        if (submittedAt <= 0L) return false;
+        try {
+            long now = System.currentTimeMillis();
+            for (Entry entry : schedule.entries) {
+                if (entry.nextAfter(now) <= 0L) continue;
+                PendingIntent pending = PendingIntent.getBroadcast(context, entry.requestCode,
+                        new Intent(context, ClassReminderReceiver.class),
+                        PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE);
+                if (pending == null) return false;
+            }
+            if (Build.VERSION.SDK_INT >= 30) {
+                // Android R+ can retain PendingIntent records after removing their alarms.
+                // Like AndroidX's force-stop check, inspect the process-exit history as well.
+                ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+                if (manager == null) return false;
+                List<ApplicationExitInfo> exits = manager.getHistoricalProcessExitReasons(null, 0, 0);
+                if (exits == null) return false;
+                for (ApplicationExitInfo exit : exits) {
+                    if (exit.getReason() == ApplicationExitInfo.REASON_USER_REQUESTED
+                            && exit.getTimestamp() >= submittedAt) return false;
+                }
+            }
+            return true;
+        } catch (RuntimeException unavailable) {
+            // A device that cannot report retained state needs a conservative full submission.
+            return false;
+        }
+    }
+
+    private static void replaceSchedule(Context context, List<Entry> entries,
+            boolean coursesReadable, boolean eventsReadable, String fingerprint, ScheduleData previous) {
+        if (!coursesReadable && !eventsReadable) return;
         if ((!coursesReadable || !eventsReadable) && previous.generation == Long.MIN_VALUE) {
             // A partial rebuild cannot safely replace an unreadable mixed schedule.
             recordSubmissionResult(context, ReminderDiagnosticRules.Code.STORE_FAILED);
@@ -65,10 +124,11 @@ final class ReminderScheduler {
             }
             usedCodes.add(requestCode);
             combined.add(requestCode == entry.requestCode ? entry : new Entry(requestCode,
-                    entry.name, entry.time, entry.room, entry.leadMinutes, entry.triggerTimes, entry.kind));
+                    entry.name, entry.time, entry.room, entry.leadMinutes, entry.triggerTimes, entry.kind, entry.repeatAlarm));
         }
         long generation = nextGeneration(previous.generation);
-        ScheduleData replacement = new ScheduleData(generation, combined);
+        ScheduleData replacement = new ScheduleData(generation, combined,
+                coursesReadable && eventsReadable ? fingerprint : null);
         if (!saveSchedule(context, replacement)) {
             recordSubmissionResult(context, ReminderDiagnosticRules.Code.STORE_FAILED);
             return;
@@ -79,7 +139,7 @@ final class ReminderScheduler {
             result = ReminderDiagnosticRules.mergeSchedule(result,
                     scheduleFirstFuture(context, entry, System.currentTimeMillis(), generation));
         }
-        recordSubmissionResult(context, result);
+        recordFullSubmission(context, replacement, result);
     }
 
     private static boolean readable(Entry entry, boolean coursesReadable, boolean eventsReadable) {
@@ -107,7 +167,7 @@ final class ReminderScheduler {
             result = ReminderDiagnosticRules.mergeSchedule(result,
                     scheduleFirstFuture(context, entry, now, schedule.generation));
         }
-        recordSubmissionResult(context, result);
+        recordFullSubmission(context, schedule, result);
     }
 
     // Returns whether this delivery is current and may notify, not whether a later alarm exists.
@@ -146,7 +206,12 @@ final class ReminderScheduler {
                 Math.max(System.currentTimeMillis(), deliveredAt),
                 current.generation
         );
-        recordSubmissionResult(context, submitted);
+        // One successful continuation cannot certify the rest of a previously failed batch.
+        if (ReminderDiagnosticRules.scheduleSucceeded(submitted)) {
+            ReminderDiagnostics.recordSchedule(context, submitted);
+        } else {
+            recordSubmissionResult(context, submitted);
+        }
         return true;
     }
 
@@ -175,7 +240,7 @@ final class ReminderScheduler {
         long nextTriggerAt = -1L;
         int pendingCourses = 0;
         for (Entry entry : entries) {
-            long candidate = TimetableRules.nextTriggerAfter(entry.triggerTimes, now);
+            long candidate = entry.nextAfter(now);
             if (candidate <= 0L) {
                 continue;
             }
@@ -227,7 +292,7 @@ final class ReminderScheduler {
             long afterMillis,
             long generation
     ) {
-        long triggerAt = TimetableRules.nextTriggerAfter(entry.triggerTimes, afterMillis);
+        long triggerAt = entry.nextAfter(afterMillis);
         if (triggerAt <= 0L) return ReminderDiagnosticRules.Code.NO_FUTURE;
         AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (alarmManager == null) return ReminderDiagnosticRules.Code.ALARM_UNAVAILABLE;
@@ -277,6 +342,22 @@ final class ReminderScheduler {
         ReminderDiagnostics.recordSchedule(context, result);
     }
 
+    /** Persist the receipt only after every alarm in this generation was submitted successfully. */
+    private static void recordFullSubmission(Context context, ScheduleData schedule,
+            ReminderDiagnosticRules.Code result) {
+        recordSubmissionResult(context, result);
+        if (schedule.sourceFingerprint == null || !ReminderDiagnosticRules.scheduleSucceeded(result)) return;
+        // A security race may have fallen back to inexact even while the capability query says true.
+        // Keep that mismatch visible to the next foreground retry instead of caching it as exact.
+        boolean exact = result != ReminderDiagnosticRules.Code.SCHEDULE_INEXACT
+                && canScheduleExactAlarms(context);
+        if (!SafePreferences.commit(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
+                new PreferenceTransaction().put(SUBMITTED_GENERATION_KEY, schedule.generation)
+                        .put(SUBMITTED_EXACT_KEY, exact).put(SUBMITTED_AT_KEY, System.currentTimeMillis()))) {
+            recordSubmissionResult(context, ReminderDiagnosticRules.Code.STORE_FAILED);
+        }
+    }
+
     private static boolean saveSchedule(Context context, ScheduleData schedule) {
         try {
             JSONArray array = new JSONArray();
@@ -285,6 +366,7 @@ final class ReminderScheduler {
             }
             JSONObject payload = new JSONObject();
             payload.put("generation", schedule.generation);
+            if (schedule.sourceFingerprint != null) payload.put("sourceFingerprint", schedule.sourceFingerprint);
             payload.put("entries", array);
             String encrypted = STORAGE.encrypt(payload.toString());
             // A failed SharedPreferences commit still changes its in-memory cache.
@@ -307,12 +389,14 @@ final class ReminderScheduler {
         try {
             String decoded = STORAGE.decrypt(encrypted);
             long generation = 0L;
+            String fingerprint = null;
             JSONArray array;
             if (decoded.trim().startsWith("[")) {
                 array = new JSONArray(decoded);
             } else {
                 JSONObject payload = new JSONObject(decoded);
                 generation = payload.optLong("generation", 0L);
+                fingerprint = payload.optString("sourceFingerprint", null);
                 array = payload.optJSONArray("entries");
                 if (array == null) {
                     return new ScheduleData(generation, entries);
@@ -324,7 +408,7 @@ final class ReminderScheduler {
                     entries.add(entry);
                 }
             }
-            return new ScheduleData(generation, entries);
+            return new ScheduleData(generation, entries, fingerprint);
         } catch (Exception ignored) {
             // Keep the encrypted payload intact. Opening the app can rebuild it from course data.
         }
@@ -347,6 +431,12 @@ final class ReminderScheduler {
         }
 
         Entry(int requestCode, String name, String time, String room, int leadMinutes, long[] triggerTimes, String kind) {
+            this(requestCode,name,time,room,leadMinutes,triggerTimes,kind,null);
+        }
+        final RepeatAlarm repeatAlarm;
+        long nextAfter(long after) { return repeatAlarm==null ? TimetableRules.nextTriggerAfter(triggerTimes,after) : repeatAlarm.next(after,leadMinutes); }
+        Entry(int requestCode,String name,String time,String room,int leadMinutes,long[] triggerTimes,String kind,RepeatAlarm repeatAlarm) {
+            this.repeatAlarm=repeatAlarm;
             this.kind = KIND_EVENT.equals(kind) ? KIND_EVENT : KIND_COURSE;
             this.requestCode = requestCode;
             this.name = name == null ? "" : name;
@@ -381,6 +471,7 @@ final class ReminderScheduler {
             for (long triggerTime : triggerTimes) {
                 times.put(triggerTime);
             }
+            if(repeatAlarm!=null) object.put("repeatAlarm",repeatAlarm.encode());
             object.put("triggerTimes", times);
             return object;
         }
@@ -404,7 +495,7 @@ final class ReminderScheduler {
                     object.optString("room", ""),
                     object.optInt("leadMinutes", 30),
                     triggerTimes,
-                    object.optString("kind", KIND_COURSE)
+                    object.optString("kind", KIND_COURSE), RepeatAlarm.decode(object.optJSONObject("repeatAlarm"))
             );
         }
 
@@ -438,10 +529,16 @@ final class ReminderScheduler {
     private static final class ScheduleData {
         final long generation;
         final List<Entry> entries;
+        final String sourceFingerprint;
 
         ScheduleData(long generation, List<Entry> entries) {
+            this(generation, entries, null);
+        }
+
+        ScheduleData(long generation, List<Entry> entries, String sourceFingerprint) {
             this.generation = generation;
             this.entries = new ArrayList<>(entries);
+            this.sourceFingerprint = sourceFingerprint;
         }
 
         Entry entryForRequestCode(int requestCode) {

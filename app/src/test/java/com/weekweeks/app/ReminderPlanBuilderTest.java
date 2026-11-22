@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.TimeZone;
 import static org.junit.Assert.*;
 
 public class ReminderPlanBuilderTest {
@@ -110,5 +111,43 @@ public class ReminderPlanBuilderTest {
         assertEquals("Math", course.name); assertEquals(4, course.id);
         assertEquals(1, events.size()); assertSame(event, events.get(0));
         assertEquals(10, event.remindMinutes);
+    }
+
+    @Test public void nonexistentLocalEventTimesAreNeverScheduled() {
+        TimeZone previous = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/Berlin"));
+            PersonalEvent skippedStart = event(1);
+            skippedStart.year = 2027; skippedStart.month = 3; skippedStart.day = 28;
+            skippedStart.startMinutes = 150; skippedStart.endMinutes = 180;
+            assertNull("Stored records remain readable after a time-zone change", skippedStart.validate());
+            assertTrue("Calendar silently changes 02:30 to 03:30", skippedStart.startMillis() > skippedStart.endMillis());
+            assertTrue("Never schedule an event whose displayed local time does not exist",
+                    build(Collections.emptyList(), Collections.singletonList(skippedStart)).isEmpty());
+        } finally { TimeZone.setDefault(previous); }
+    }
+
+    @Test public void skippedEndsAreExcludedWithoutChangingValidTransitionReminders() {
+        TimeZone previous = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/Berlin"));
+            PersonalEvent skippedEnd = event(1);
+            skippedEnd.year = 2027; skippedEnd.month = 3; skippedEnd.day = 28;
+            skippedEnd.startMinutes = 90; skippedEnd.endMinutes = 150;
+            PersonalEvent crossingGap = skippedEnd.copy();
+            crossingGap.id = 2; crossingGap.endMinutes = 210;
+            PersonalEvent repeatedHour = skippedEnd.copy();
+            repeatedHour.id = 3; repeatedHour.month = 10; repeatedHour.day = 31;
+            repeatedHour.startMinutes = 135; repeatedHour.endMinutes = 165;
+            List<ReminderScheduler.Entry> entries = build(Collections.emptyList(),
+                    Arrays.asList(skippedEnd, crossingGap, repeatedHour));
+            assertEquals(2, entries.size());
+            assertEquals(ReminderPlanBuilder.eventRequestCode(crossingGap), entries.get(0).requestCode);
+            assertArrayEquals(new long[]{crossingGap.triggerAtMillis()}, entries.get(0).triggerTimes);
+            assertEquals(ReminderPlanBuilder.eventRequestCode(repeatedHour), entries.get(1).requestCode);
+            assertArrayEquals(new long[]{repeatedHour.triggerAtMillis()}, entries.get(1).triggerTimes);
+            assertEquals(150, skippedEnd.endMinutes);
+            assertNull(skippedEnd.validate());
+        } finally { TimeZone.setDefault(previous); }
     }
 }

@@ -53,16 +53,16 @@
 
     <!-- Import -->
     <string name="sheet_import_title">导入课表</string>
-    <string name="sheet_import_pdf_sub">支持 PDF，以及每行一门课的 XLSX、CSV、TSV、TXT 列表</string>
+    <string name="sheet_import_pdf_sub">支持 PDF，以及课程列表或周课表（XLSX、CSV、TSV、TXT）</string>
     <string name="sheet_paste_title">粘贴文本课表</string>
-    <string name="sheet_import_paste_sub">PDF 样式不同识别不了时，按示例格式整理后粘贴</string>
+    <string name="sheet_import_paste_sub">粘贴课程列表，或从表格复制含星期表头和节次的周课表</string>
     <string name="sheet_text_badge">文</string>
     <string name="sheet_file_badge">文件</string>
     <string name="sheet_label_with_sub">%1$s，%2$s</string>
     <string name="sheet_discard_paste_title">放弃已粘贴的内容？</string>
     <string name="sheet_discard_paste_message">关闭后，输入框里的课表文本不会保留。</string>
     <string name="sheet_discard">放弃</string>
-    <string name="sheet_paste_intro">每行一门课，各项用 | 分隔（也可用 Tab，方便从表格复制）。上课周、地点、老师可以留空，留空的上课周表示每周都上。</string>
+    <string name="sheet_paste_intro">列表每行一门课，用 | 或 Tab 分隔。也可直接复制周课表：第一行是星期，第一列是节次（如 1–2）。周次留空表示每周上课。</string>
     <string name="sheet_example">示例</string>
     <string name="sheet_paste_rules" tools:ignore="TypographyDashes">星期：周一~周日、星期一、1~7 均可\n节次：1-2、3、第9-10节\n上课周：1-16周、1-16周单周、2-16周双周、1-8周,10-16周</string>
     <string name="sheet_your_timetable">你的课表</string>

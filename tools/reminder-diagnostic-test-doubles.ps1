@@ -13,25 +13,26 @@ $sources['android/content/Intent.java'] = $sources['android/content/Intent.java'
 $sources['android/content/Intent.java'] = $sources['android/content/Intent.java'].Replace('public String getAction(){return action;}', 'public String getAction(){return action;} public Intent setAction(String a){action=a;return this;} public android.net.Uri getData(){return data;} public Intent(String a,android.net.Uri d){action=a;data=d;} public Intent addFlags(int f){return this;}')
 $sources['android/content/Intent.java'] = $sources['android/content/Intent.java'].Replace('setData(android.net.Uri v){return this;}', 'setData(android.net.Uri v){data=v;return this;}')
 # SharedPreferences failure/rollback behavior is supplied by the base harness.
-$sources['android/content/Context.java'] = $sources['android/content/Context.java'].Replace('NOTIFICATION_SERVICE="notification";', 'NOTIFICATION_SERVICE="notification", POWER_SERVICE="power";')
+$sources['android/content/Context.java'] = $sources['android/content/Context.java'].Replace('ACTIVITY_SERVICE="activity";', 'ACTIVITY_SERVICE="activity", POWER_SERVICE="power";')
 $sources['android/content/Context.java'] = $sources['android/content/Context.java'].Replace('public int notificationPermission=0;', 'public int notificationPermission=0; public boolean alarmUnavailable=false,notificationUnavailable=false; public final java.util.Map<String,SharedPreferences> namespaces=new java.util.HashMap<>(); public String getPackageName(){return "com.weekweeks.app";} public String getString(int id,Object... args){return getString(id);} ')
 $sources['android/content/Context.java'] = $sources['android/content/Context.java'].Replace('return prefs;', 'return "week_weeks".equals(name)?prefs:namespaces.computeIfAbsent(name,k->new SharedPreferences());')
-$sources['android/content/Context.java'] = $sources['android/content/Context.java'].Replace('return ALARM_SERVICE.equals(name)?alarms:notifications;', 'if(POWER_SERVICE.equals(name))return new android.os.PowerManager(); return ALARM_SERVICE.equals(name)?(alarmUnavailable?null:alarms):(notificationUnavailable?null:notifications);')
+$sources['android/content/Context.java'] = $sources['android/content/Context.java'].Replace('return ALARM_SERVICE.equals(name)?alarms:ACTIVITY_SERVICE.equals(name)?activities:notifications;', 'if(POWER_SERVICE.equals(name))return new android.os.PowerManager(); if(ACTIVITY_SERVICE.equals(name))return activities; return ALARM_SERVICE.equals(name)?(alarmUnavailable?null:alarms):(notificationUnavailable?null:notifications);')
 $sources['android/app/PendingIntent.java'] = @'
 package android.app;
 import android.content.*; import java.util.*;
 public class PendingIntent {
  public static final int FLAG_NO_CREATE=1,FLAG_IMMUTABLE=2,FLAG_UPDATE_CURRENT=4;
- private static final Map<Context,Map<String,PendingIntent>> all=new IdentityHashMap<>();
+ private static final Map<AlarmManager,Map<String,PendingIntent>> all=new IdentityHashMap<>();
  public final Context context;public final int code;public Intent intent;private final String key;
  private PendingIntent(Context c,int code,Intent i,String key){context=c;this.code=code;intent=i;this.key=key;}
  public static PendingIntent getBroadcast(Context c,int code,Intent i,int flags){
-  String key=code+":"+i.getAction()+":"+i.getData();Map<String,PendingIntent> map=all.computeIfAbsent(c,k->new HashMap<>());
+  String key=code+":"+i.getAction()+":"+i.getData();Map<String,PendingIntent> map=all.computeIfAbsent(c.alarms,k->new HashMap<>());
   if((flags&FLAG_NO_CREATE)!=0)return map.get(key);
   PendingIntent p=map.computeIfAbsent(key,k->new PendingIntent(c,code,i,key));p.intent=i;return p;
  }
  public static PendingIntent getActivity(Context c,int code,Intent i,int flags){return new PendingIntent(c,code,i,"activity");}
- public void cancel(){Map<String,PendingIntent> map=all.get(context);if(map!=null)map.remove(key);}
+ public void cancel(){Map<String,PendingIntent> map=all.get(context.alarms);if(map!=null)map.remove(key);}
+ public static void simulateForceStop(Context c){all.remove(c.alarms);c.alarms.simulateSystemCancellation();}
 }
 '@
 $sources['android/app/AlarmManager.java'] = $sources['android/app/AlarmManager.java'].Replace('public boolean allowed=true, fail=false;', 'public boolean allowed=true, fail=false, failExactOnly=false;')

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="scope_title">要修改哪一次？</string>
+    <string name="scope_lesson">整門課程</string>
+    <string name="scope_event">整個重複日程</string>
+    <string name="scope_once">僅本次 · %1$s</string>
+    <string name="scope_lesson_edit">調整本次課程</string>
+    <string name="scope_stop">本次停課</string>
+    <string name="scope_stop_confirm">取消 %1$s 的這一次課程及其提醒？其他上課日期保持原樣。</string>
+    <string name="scope_outside">調課日期須在目前學期內</string>
+    <string name="scope_dates">原上課日期：%1$s</string>
+    <string name="repeat_title">重複</string>
+    <string name="repeat_once">不重複</string>
+    <string name="repeat_daily">每天</string>
+    <string name="repeat_work">工作日（週一至週五）</string>
+    <string name="repeat_weekly">每週指定星期</string>
+    <string name="repeat_until">截止日期（含當天）</string>
+    <string name="repeat_no_end">無截止日期</string>
+    <string name="repeat_end_clear">清除截止日期</string>
+    <string name="repeat_pick">設定截止日期</string>
+    <string name="repeat_delete_one">刪除本次日程</string>
+    <string name="repeat_delete_one_msg">只刪除這一次及其提醒，其他日期不變。</string>
+    <string name="conflict_title">時間衝突</string>
+    <string name="conflict_keep">繼續儲存</string>
+    <string name="conflict_back">返回修改</string>
+    <string name="conflict_row">%1$s %2$s · 與「%3$s」重疊 %4$d 分鐘</string>
+    <string name="conflict_point">%1$s %2$s · 與「%3$s」時間重合（未設日程結束時間）</string>
+    <plurals name="conflict_count"><item quantity="other">時間衝突（%1$d 處）</item></plurals>
+    <string name="scope_period_order">結束節次不能早於開始節次</string>
+    <string name="scope_removed">該安排已不存在</string>
+    <string name="scope_on_date">上課日期</string>
+    <string name="scope_start_period">開始節次</string>
+    <string name="scope_end_period">結束節次</string>
+    <string name="repeat_scope_label">重複日程</string>
+</resources>

@@ -49,16 +49,16 @@
     <string name="sheet_think_again">再想想</string>
 
     <string name="sheet_import_title">匯入課表</string>
-    <string name="sheet_import_pdf_sub">支援 PDF，以及每行一門課的 XLSX、CSV、TSV、TXT 清單</string>
+    <string name="sheet_import_pdf_sub">支援 PDF，以及課程清單或週課表（XLSX、CSV、TSV、TXT）</string>
     <string name="sheet_paste_title">貼上文字課表</string>
-    <string name="sheet_import_paste_sub">PDF 樣式不同而無法辨識時，依範例格式整理後貼上</string>
+    <string name="sheet_import_paste_sub">貼上課程清單，或從試算表複製含星期表頭和節次的週課表</string>
     <string name="sheet_text_badge">文</string>
     <string name="sheet_file_badge">檔案</string>
     <string name="sheet_label_with_sub">%1$s，%2$s</string>
     <string name="sheet_discard_paste_title">放棄已貼上的內容？</string>
     <string name="sheet_discard_paste_message">關閉後，輸入框中的課表文字不會保留。</string>
     <string name="sheet_discard">放棄</string>
-    <string name="sheet_paste_intro">每行一門課，各項以 | 分隔（也可用 Tab，方便從表格複製）。上課週、地點、老師可以留空，上課週留空表示每週都上。</string>
+    <string name="sheet_paste_intro">清單每列一門課，以 | 或 Tab 分隔。也可直接複製週課表：第一列是星期，第一欄是節次（如 1–2）。週次留空表示每週上課。</string>
     <string name="sheet_example">範例</string>
     <string name="sheet_paste_rules" tools:ignore="TypographyDashes">星期：周一~周日、星期一、1~7 皆可\n節次：1-2、3、第9-10节\n上課週：1-16周、1-16周单周、2-16周双周、1-8周,10-16周</string>
     <string name="sheet_your_timetable">你的課表</string>

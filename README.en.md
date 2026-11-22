@@ -62,7 +62,9 @@ Choose a mode under Settings → Display content → Mode selection to control w
 
 ### Agenda: make room for life
 
-- Add one-time personal events with a date, start/end times, location, and notes.
+- Create one-time, daily, weekday (Monday–Friday), or weekly events on selected days. An optional end date is inclusive. Edit just one occurrence or the entire series.
+- Edit a course from its detail view or long-press a class card. Move one class to a different date or period, change its room, cancel that class, or edit the entire course. Reminders follow the actual class.
+- Saving a class or event lists its overlaps with the other type of schedule. Scroll through all conflicts to see the date, time span, and overlapping minutes, then go back to edit or save anyway.
 - In Agenda mode, Week view places events on a shared time axis and sizes cards to their duration. Short events and events without an end time keep a minimum visual span of 30 minutes; their saved times remain unchanged.
 - Overlapping events use side-by-side cards when space permits. A count badge groups events when space is tight; tap it to choose from every event in the group. Counts over 99 appear as `99+`.
 - Each day has an add button for that date. List view displays the selected content in time order.
@@ -73,7 +75,7 @@ Choose a mode under Settings → Display content → Mode selection to control w
 
 - Import text-based **PDF, XLSX, CSV, TSV, or TXT** timetables through the system file picker, without requesting broad storage read/write permissions. You can also paste timetable text.
 - Preview the parsed courses, review individual entries, and confirm before saving.
-- Spreadsheets and delimited text use **one course per row**. Start with the [XLSX template](<docs/templates/timetable-list-template.xlsx>) or [CSV template](<docs/templates/timetable-list-template.csv>).
+- XLSX, delimited files and pasted text accept both course lists ([XLSX template](<docs/templates/timetable-list-template.xlsx>), [CSV template](<docs/templates/timetable-list-template.csv>)) and [weekly grids](<docs/IMPORT-PARSERS-20261119.md>) with weekday headings across the top and period numbers on the left. In XLSX, merge consecutive periods vertically in one weekday column. When pasting or exporting to text, write the range explicitly, e.g. `1-2`.
 - Common Simplified Chinese, Traditional Chinese, and English column headings and weekday names such as `周一` and `Mon` are supported. See the [import guide](<docs/IMPORT-PARSERS-20261114.md>) and [parser compatibility notes](<docs/IMPORT-PARSERS-20261115.md>) for formats and limitations.
 - Legacy `.xls` files must first be saved as XLSX or CSV. Arbitrary visual spreadsheet grids are not automatically recognized. PDF parsing depends on the document layout, and OCR for scanned documents is not supported.
 
@@ -115,13 +117,15 @@ Reminders may be affected by notification permissions, exact alarm permissions, 
 
 The official application ID is `com.weekweeks.app`. Development and release builds use the same current interface; there are no separate “original” and “pastel” product editions. The internal `pastel` build is retained only as a compatibility testing entry point, not a separate product version. Data does not migrate automatically between different application IDs, and apps from before the rename are not automatically uninstalled.
 
-The current source version is **1.2.8** (`versionCode 11`).
+The current source version is **1.2.9** (`versionCode 12`).
 
-Download: [Week weeks 1.2.8 APK](https://github.com/KingRaindrop/Week-weeks/releases/download/v1.2.8/week-weeks-1.2.8.apk) · [GitHub Release page](https://github.com/KingRaindrop/Week-weeks/releases/tag/v1.2.8). You can also build from source as described below.
+Download: [Week weeks 1.2.9 APK](https://github.com/KingRaindrop/Week-weeks/releases/download/v1.2.9/week-weeks-1.2.9.apk) · [GitHub Release page](https://github.com/KingRaindrop/Week-weeks/releases/tag/v1.2.9). You can also build from source as described below.
 
 The official APK does not include the local OPPO Sans font file; the app uses the system font when that file is unavailable.
 
 ## Current changes and verification
+
+v1.2.9 adds single-class changes and cancellations, recurring events, and warnings for overlaps between classes and events. XLSX, CSV, TSV, TXT and pasted text now accept weekly grids with weekday and period headings. Text-based PDF import handles more Traditional Chinese labels, full-width digits, and room values. Debug and Release each passed **416 unit tests**; Release Lint reported **0 errors and 7 existing warnings**. MuMu checks covered schedule changes, recurrence, reminder recovery and import preview.
 
 The November 16, 2026 update improves event timelines, overlap selection, grouped settings, returning from setting dialogs, and time-editing feedback. Debug and Release each passed **368 unit tests**, and both lint reports show **0 errors and 7 existing warnings**. The isolated UI device audit passed **993 checks**, with additional mode-switching, timeline, and reminder-flow regressions passing.
 

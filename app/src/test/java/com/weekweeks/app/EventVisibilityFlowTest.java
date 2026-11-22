@@ -18,7 +18,7 @@ public class EventVisibilityFlowTest {
         String activity = source("MainActivity");
         assertTrue(activity.contains("StoredTimetableSnapshot.readEvents("));
         assertTrue(source("StoredTimetableSnapshot").contains("event.showInTimetable = o.optBoolean(\"showInTimetable\", true)"));
-        assertTrue(activity.contains("o.put(\"showInTimetable\", e.showInTimetable)"));
+        assertTrue(source("StoredTimetableSnapshot").contains("put(\"showInTimetable\",e.showInTimetable)"));
     }
 
     @Test public void individualVisibilityFiltersTimetableWhileDisplayModeAlsoControlsMine() throws Exception {
@@ -29,7 +29,8 @@ public class EventVisibilityFlowTest {
         assertTrue(binding.contains("refreshMinePage();"));
         String mine = activity.substring(activity.indexOf("private void refreshMinePage("),
                 activity.indexOf("private String cleanField("));
-        assertTrue(mine.contains("minePage.setEvents(displayMode.showsEvents() ? new ArrayList<>(personalEvents) : Collections.emptyList())"));
+        assertTrue(mine.contains("if(displayMode.showsEvents()) for(PersonalEvent series:personalEvents)"));
+        assertTrue(mine.contains("minePage.setEvents(rows)"));
         assertTrue(activity.contains("displayMode.showsEvents() && !eventFromMine && candidate.showInTimetable"));
     }
 

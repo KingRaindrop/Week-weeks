@@ -1,6 +1,12 @@
 package com.weekweeks.app;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.content.Context;
+import android.provider.Settings;
+import android.graphics.Rect;
+import android.view.animation.DecelerateInterpolator;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -80,6 +86,8 @@ public class PastelTimetableView extends FrameLayout {
         default void onEvents(long[] ids) { if (ids != null && ids.length > 0) onEvent(ids[0]); }
         /** 「我的」tab: personal agenda management and settings. */
         void onMine();
+        /** Called only after a page selection commits, never for a drag preview. */
+        default void onTabChanged(int previous, int current) {}
     }
 
     private final String[] DAYS = getResources().getStringArray(R.array.view_days);
@@ -90,19 +98,34 @@ public class PastelTimetableView extends FrameLayout {
     private final UiSemanticPalette uiColors;
     private final int bottomHeight;
     private final PastelAccent theme;
-    private final LinearLayout content, hero, list, bottom;
+    private final LinearLayout list, bottom;
+    private final FrameLayout pageHost;
+    private final ScrollView scroll, agendaScroll;
+    private final PageHeader[] headers;
+    // Keep the week header references available to layout diagnostics.
     private final FrameLayout heroFrame;
     private final View importButton;
-    private final ScrollView scroll;
-    private final TextView status, heroTitle, heroTime, heroRoom, heroPeriod, countdown;
+    private final TextView countdown;
+    private final TabNavigationState navigation = new TabNavigationState();
+    private ValueAnimator pageAnimator;
+    private long transitionGeneration;
+    private boolean contentRefreshPending;
+    private int contentUpdateDepth;
     private long countdownTarget = -1;
     private boolean countdownUntilEnd, countdownFired;
+    private Runnable countdownCompletion;
     private final Runnable countdownTick = new Runnable() {
         @Override public void run() {
+            if (!canRunCountdown()) return;
             updateCountdown();
-            if (displayMode.showsCourses() && countdownTarget > 0 && isAttachedToWindow()) {
+            if (canRunCountdown() && !countdownFired && countdownCompletion == null) {
                 long now = System.currentTimeMillis();
                 long remaining = countdownTarget - now;
+                if (remaining <= 0) {
+                    // The target may pass while the two headers are being refreshed.
+                    updateCountdown();
+                    return;
+                }
                 // mm:ss below one hour: tick on each whole second. Otherwise only minutes are shown,
                 // so wake up when the displayed minute changes (or when the one-hour mark is crossed).
                 long delay = remaining <= 3_600_000L
@@ -112,7 +135,6 @@ public class PastelTimetableView extends FrameLayout {
             }
         }
     };
-    private final TextView weekTitle, previous, next, current, weekSegment, listSegment, notice, modeLabel;
     private final TextView[] tabLabels = new TextView[3];
     private final IconView[] tabIcons = new IconView[3];
     private final WeekGrid grid;
@@ -154,158 +176,26 @@ public class PastelTimetableView extends FrameLayout {
         bottomHeight = dp(Math.max(62, 38 + 14 * fontScale));
         setBackgroundColor(background);
         setClipToPadding(true);
-        scroll = new ScrollView(context);
-        scroll.setFillViewport(true);
-        scroll.setClipToPadding(false);
-        scroll.setVerticalScrollBarEnabled(false);
-        FrameLayout.LayoutParams scrolling = new FrameLayout.LayoutParams(-1, -1);
-        scrolling.bottomMargin = bottomHeight;
-        addView(scroll, scrolling);
-        content = column();
-        content.setPadding(dp(14), 0, dp(14), dp(10));
-        scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
-
-        LinearLayout header = row();
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setMinimumHeight(dp(52));
-        IconView cap = new IconView(context, "cap", ink);
-        header.addView(cap, new LinearLayout.LayoutParams(dp(31), dp(32)));
-        TextView title = text(s(R.string.view_title), 23, ink, true);
-        title.setSingleLine(true);
-        title.setEllipsize(TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1);
-        titleParams.leftMargin = dp(8);
-        header.addView(title, titleParams);
-        importButton = iconButton("import", s(R.string.view_import_timetable), () -> {
-            if (displayMode.showsCourses() && actions != null) actions.onImport();
-        });
-        header.addView(importButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
-        header.addView(iconButton(dark ? "sun" : "moon", dark ? s(R.string.view_switch_light) : s(R.string.view_switch_dark),
-                () -> { if (actions != null) actions.onToggleTheme(); }), new LinearLayout.LayoutParams(dp(44), dp(44)));
-        header.addView(iconButton("settings", s(R.string.view_timetable_settings), () -> { if (actions != null) actions.onSettings(); }), new LinearLayout.LayoutParams(dp(44), dp(44)));
-        content.addView(header, new LinearLayout.LayoutParams(-1, -2));
-        modeLabel = text(s(R.string.ui_refinement_content_mode, s(R.string.ui_refinement_mode_combined)), 11, muted, false);
-        modeLabel.setTag("timetable:mode_label");
-        modeLabel.setPadding(dp(2), 0, dp(2), dp(6));
-        modeLabel.setMaxLines(2);
-        modeLabel.setEllipsize(TextUtils.TruncateAt.END);
-        content.addView(modeLabel, new LinearLayout.LayoutParams(-1, -2));
-
-        heroFrame = new FrameLayout(context);
-        GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{this.theme.heroStart, this.theme.heroEnd});
-        gradient.setCornerRadius(dp(24));
-        if (dark) gradient.setStroke(dp(1), Color.argb(24, 255, 255, 255));
-        heroFrame.setBackground(gradient);
-        hero = column();
-        hero.setPadding(dp(18), dp(12), dp(92), dp(10));
-        heroFrame.addView(hero, new FrameLayout.LayoutParams(-1, -1));
-        status = text(s(R.string.view_status_schedule), 10, dark ? coral : color("#55451A"), true);
-        status.setPadding(dp(9), dp(3), dp(9), dp(3));
-        status.setBackground(round(dark ? this.theme.tint : color("#FFE6A0"), 12));
-        LinearLayout statusRow = row();
-        statusRow.setGravity(Gravity.CENTER_VERTICAL);
-        statusRow.addView(status, new LinearLayout.LayoutParams(-2, -2));
-        countdown = text("", 10, dark ? ink : Color.WHITE, true);
-        countdown.setSingleLine(true);
-        countdown.setPadding(dp(9), dp(3), dp(9), dp(3));
-        countdown.setBackground(round(Color.argb(dark ? 32 : 46, 255, 255, 255), 12));
-        countdown.setVisibility(GONE);
-        LinearLayout.LayoutParams cdp = new LinearLayout.LayoutParams(-2, -2);
-        cdp.leftMargin = dp(6);
-        statusRow.addView(countdown, cdp);
-        hero.addView(statusRow, new LinearLayout.LayoutParams(-2, -2));
-        heroTitle = text(s(R.string.view_hero_new_day), 19, dark ? ink : Color.WHITE, true);
-        heroTitle.setMaxLines(1);
-        heroTitle.setEllipsize(TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams ht = new LinearLayout.LayoutParams(-1, -2);
-        ht.topMargin = dp(7);
-        hero.addView(heroTitle, ht);
-        heroTime = text(s(R.string.view_hero_add_courses), 11, this.theme.heroText, false);
-        heroRoom = text("", 10, this.theme.heroText, false);
-        heroPeriod = text("", 10, this.theme.heroText, false);
-        heroTime.setSingleLine(true);
-        heroTime.setEllipsize(TextUtils.TruncateAt.END);
-        heroRoom.setSingleLine(true);
-        heroRoom.setEllipsize(TextUtils.TruncateAt.END);
-        heroPeriod.setSingleLine(true);
-        heroTime.setCompoundDrawablesWithIntrinsicBounds(new SmallIcon("clock", this.theme.heroText), null, null, null);
-        heroTime.setCompoundDrawablePadding(dp(4));
-        heroRoom.setCompoundDrawablesWithIntrinsicBounds(new SmallIcon("location", this.theme.heroText), null, null, null);
-        heroRoom.setCompoundDrawablePadding(dp(4));
-        hero.addView(heroTime);
-        LinearLayout metadata = row();
-        metadata.addView(heroRoom, new LinearLayout.LayoutParams(0, -2, 1));
-        metadata.addView(heroPeriod, new LinearLayout.LayoutParams(-2, -2));
-        hero.addView(metadata);
-        IconView book = new IconView(context, "book", this.theme.heroIcon);
-        FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(dp(80), dp(80), Gravity.END | Gravity.CENTER_VERTICAL);
-        bp.rightMargin = dp(9);
-        heroFrame.addView(book, bp);
-        LinearLayout.LayoutParams heroParams = new LinearLayout.LayoutParams(-1,
-                dp(112 * Math.max(1f, getResources().getConfiguration().fontScale)));
-        heroParams.topMargin = dp(4);
-        heroParams.bottomMargin = dp(4);
-        content.addView(heroFrame, heroParams);
-        heroFrame.setOnClickListener(v -> { if (featured != null) openCourse(featured); });
-        heroFrame.setOnLongClickListener(v -> { if (featured == null) return false; editCourse(v, featured); return true; });
-        heroFrame.setContentDescription(s(R.string.view_hero_desc));
-
-        LinearLayout navigation = row();
-        navigation.setGravity(Gravity.CENTER_VERTICAL);
-        int navigationHeight = dp(Math.max(40, 8 + 30 * fontScale));
-        previous = nav("‹", s(R.string.view_previous_week), () -> { if (actions != null) actions.onPreviousWeek(); });
-        next = nav("›", s(R.string.view_next_week), () -> { if (actions != null) actions.onNextWeek(); });
-        weekTitle = text(s(R.string.view_this_week), 13, ink, true);
-        weekTitle.setGravity(Gravity.CENTER);
-        weekTitle.setMaxLines(2);
-        weekTitle.setEllipsize(TextUtils.TruncateAt.END);
-        weekTitle.setOnClickListener(v -> { if (actions != null) actions.onPickWeek(); });
-        weekTitle.setContentDescription(s(R.string.view_pick_week_desc));
-        navigation.addView(previous, new LinearLayout.LayoutParams(dp(38), navigationHeight));
-        navigation.addView(weekTitle, new LinearLayout.LayoutParams(0, navigationHeight, 1));
-        navigation.addView(next, new LinearLayout.LayoutParams(dp(38), navigationHeight));
-        current = text(s(R.string.view_this_week_short), 11, coral, true);
-        current.setGravity(Gravity.CENTER);
-        current.setOnClickListener(v -> { if (actions != null) actions.onCurrentWeek(); });
-        current.setContentDescription(s(R.string.view_back_to_this_week));
-        current.setMaxLines(2);
-        current.setEllipsize(TextUtils.TruncateAt.END);
-        navigation.addView(current, new LinearLayout.LayoutParams(dp(43), navigationHeight));
-        content.addView(navigation, new LinearLayout.LayoutParams(-1, navigationHeight));
-
-        LinearLayout segments = row();
-        segments.setPadding(dp(3), dp(3), dp(3), dp(3));
-        segments.setBackground(round(uiColors.inset, 13));
-        weekSegment = text(s(R.string.ui_refinement_layout_week), 12, uiColors.onAccent, true);
-        listSegment = text(s(R.string.ui_refinement_layout_list), 12, muted, true);
-        weekSegment.setGravity(Gravity.CENTER);
-        listSegment.setGravity(Gravity.CENTER);
-        weekSegment.setSingleLine(true);
-        listSegment.setSingleLine(true);
-        weekSegment.setEllipsize(TextUtils.TruncateAt.END);
-        listSegment.setEllipsize(TextUtils.TruncateAt.END);
-        segments.addView(weekSegment, new LinearLayout.LayoutParams(0, -1, 1));
-        segments.addView(listSegment, new LinearLayout.LayoutParams(0, -1, 1));
-        weekSegment.setOnClickListener(v -> setListMode(false));
-        listSegment.setOnClickListener(v -> setListMode(true));
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(14 + 22 * fontScale));
-        sp.bottomMargin = dp(9);
-        content.addView(segments, sp);
-
+        pageHost = new FrameLayout(context);
+        pageHost.setClipChildren(true);
+        FrameLayout.LayoutParams pages = new FrameLayout.LayoutParams(-1, -1);
+        pages.bottomMargin = bottomHeight;
+        addView(pageHost, pages);
+        scroll = newPageScroll(context);
+        agendaScroll = newPageScroll(context);
+        headers = new PageHeader[]{new PageHeader(context, false), new PageHeader(context, true)};
+        scroll.addView(headers[0].content, new ScrollView.LayoutParams(-1, -2));
+        agendaScroll.addView(headers[1].content, new ScrollView.LayoutParams(-1, -2));
+        heroFrame = headers[0].heroFrame;
+        importButton = headers[0].importButton;
+        countdown = headers[0].countdown;
         grid = new WeekGrid(context);
-        content.addView(grid, new LinearLayout.LayoutParams(-1, dp(34 + 8 * 54)));
+        headers[0].content.addView(grid, new LinearLayout.LayoutParams(-1, dp(34 + 8 * 54)));
         list = column();
-        list.setVisibility(GONE);
-        content.addView(list, new LinearLayout.LayoutParams(-1, -2));
-        notice = text(HINT, 11, muted, false);
-        notice.setTag("timetable:notice");
-        notice.setPadding(dp(3), dp(3), dp(3), dp(3));
-        notice.setClickable(false);
-        notice.setFocusable(false);
-        LinearLayout.LayoutParams announcementParams = new LinearLayout.LayoutParams(-1, -2);
-        announcementParams.topMargin = dp(9);
-        content.addView(notice, announcementParams);
+        headers[1].content.addView(list, new LinearLayout.LayoutParams(-1, -2));
+        for (PageHeader header : headers) header.addNotice();
+        agendaScroll.setVisibility(INVISIBLE);
+        agendaScroll.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
 
         bottom = row();
         bottom.setGravity(Gravity.CENTER);
@@ -346,6 +236,185 @@ public class PastelTimetableView extends FrameLayout {
         updateSegments();
     }
 
+    private ScrollView newPageScroll(Context context) {
+        ScrollView page = new ScrollView(context);
+        page.setFillViewport(true);
+        page.setClipToPadding(false);
+        page.setVerticalScrollBarEnabled(false);
+        page.setBackgroundColor(background);
+        pageHost.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        return page;
+    }
+
+    /** Each content page owns its header and scroll view; navigation never rebuilds them. */
+    private final class PageHeader {
+        final LinearLayout content, hero;
+        final FrameLayout heroFrame;
+        final View importButton;
+        final TextView status, heroTitle, heroTime, heroRoom, heroPeriod, countdown;
+        final TextView weekTitle, previous, next, current, weekSegment, listSegment, modeLabel;
+        TextView notice;
+        final boolean agenda;
+
+        PageHeader(Context context, boolean agenda) {
+            this.agenda = agenda;
+            float fontScale = Math.max(1f, getResources().getConfiguration().fontScale);
+            content = column();
+            content.setPadding(dp(14), 0, dp(14), dp(10));
+            LinearLayout header = row();
+            header.setGravity(Gravity.CENTER_VERTICAL);
+            header.setMinimumHeight(dp(52));
+            IconView cap = new IconView(context, "cap", ink);
+            header.addView(cap, new LinearLayout.LayoutParams(dp(31), dp(32)));
+            TextView title = text(s(R.string.view_title), 23, ink, true);
+            title.setSingleLine(true);
+            title.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1);
+            titleParams.leftMargin = dp(8);
+            header.addView(title, titleParams);
+            importButton = iconButton("import", s(R.string.view_import_timetable), () -> {
+                if (displayMode.showsCourses() && actions != null) actions.onImport();
+            });
+            header.addView(importButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
+            header.addView(iconButton(dark ? "sun" : "moon", dark ? s(R.string.view_switch_light) : s(R.string.view_switch_dark),
+                    () -> { if (actions != null) actions.onToggleTheme(); }), new LinearLayout.LayoutParams(dp(44), dp(44)));
+            header.addView(iconButton("settings", s(R.string.view_timetable_settings), () -> { if (actions != null) actions.onSettings(); }), new LinearLayout.LayoutParams(dp(44), dp(44)));
+            content.addView(header, new LinearLayout.LayoutParams(-1, -2));
+            modeLabel = text(s(R.string.ui_refinement_content_mode, s(R.string.ui_refinement_mode_combined)), 11, muted, false);
+            modeLabel.setTag("timetable:mode_label");
+            modeLabel.setPadding(dp(2), 0, dp(2), dp(6));
+            modeLabel.setMaxLines(2);
+            modeLabel.setEllipsize(TextUtils.TruncateAt.END);
+            content.addView(modeLabel, new LinearLayout.LayoutParams(-1, -2));
+
+            heroFrame = new FrameLayout(context);
+            GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                    new int[]{PastelTimetableView.this.theme.heroStart, PastelTimetableView.this.theme.heroEnd});
+            gradient.setCornerRadius(dp(24));
+            if (dark) gradient.setStroke(dp(1), Color.argb(24, 255, 255, 255));
+            heroFrame.setBackground(gradient);
+            hero = column();
+            hero.setPadding(dp(18), dp(12), dp(92), dp(10));
+            heroFrame.addView(hero, new FrameLayout.LayoutParams(-1, -1));
+            status = text(s(R.string.view_status_schedule), 10, dark ? coral : color("#55451A"), true);
+            status.setPadding(dp(9), dp(3), dp(9), dp(3));
+            status.setBackground(round(dark ? PastelTimetableView.this.theme.tint : color("#FFE6A0"), 12));
+            LinearLayout statusRow = row();
+            statusRow.setGravity(Gravity.CENTER_VERTICAL);
+            statusRow.addView(status, new LinearLayout.LayoutParams(-2, -2));
+            countdown = text("", 10, dark ? ink : Color.WHITE, true);
+            countdown.setSingleLine(true);
+            countdown.setPadding(dp(9), dp(3), dp(9), dp(3));
+            countdown.setBackground(round(Color.argb(dark ? 32 : 46, 255, 255, 255), 12));
+            countdown.setVisibility(GONE);
+            LinearLayout.LayoutParams cdp = new LinearLayout.LayoutParams(-2, -2);
+            cdp.leftMargin = dp(6);
+            statusRow.addView(countdown, cdp);
+            hero.addView(statusRow, new LinearLayout.LayoutParams(-2, -2));
+            heroTitle = text(s(R.string.view_hero_new_day), 19, dark ? ink : Color.WHITE, true);
+            heroTitle.setMaxLines(1);
+            heroTitle.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams ht = new LinearLayout.LayoutParams(-1, -2);
+            ht.topMargin = dp(7);
+            hero.addView(heroTitle, ht);
+            heroTime = text(s(R.string.view_hero_add_courses), 11, PastelTimetableView.this.theme.heroText, false);
+            heroRoom = text("", 10, PastelTimetableView.this.theme.heroText, false);
+            heroPeriod = text("", 10, PastelTimetableView.this.theme.heroText, false);
+            heroTime.setSingleLine(true);
+            heroTime.setEllipsize(TextUtils.TruncateAt.END);
+            heroRoom.setSingleLine(true);
+            heroRoom.setEllipsize(TextUtils.TruncateAt.END);
+            heroPeriod.setSingleLine(true);
+            heroTime.setCompoundDrawablesWithIntrinsicBounds(new SmallIcon("clock", PastelTimetableView.this.theme.heroText), null, null, null);
+            heroTime.setCompoundDrawablePadding(dp(4));
+            heroRoom.setCompoundDrawablesWithIntrinsicBounds(new SmallIcon("location", PastelTimetableView.this.theme.heroText), null, null, null);
+            heroRoom.setCompoundDrawablePadding(dp(4));
+            hero.addView(heroTime);
+            LinearLayout metadata = row();
+            metadata.addView(heroRoom, new LinearLayout.LayoutParams(0, -2, 1));
+            metadata.addView(heroPeriod, new LinearLayout.LayoutParams(-2, -2));
+            hero.addView(metadata);
+            IconView book = new IconView(context, "book", PastelTimetableView.this.theme.heroIcon);
+            FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(dp(80), dp(80), Gravity.END | Gravity.CENTER_VERTICAL);
+            bp.rightMargin = dp(9);
+            heroFrame.addView(book, bp);
+            LinearLayout.LayoutParams heroParams = new LinearLayout.LayoutParams(-1,
+                    dp(112 * Math.max(1f, getResources().getConfiguration().fontScale)));
+            heroParams.topMargin = dp(4);
+            heroParams.bottomMargin = dp(4);
+            content.addView(heroFrame, heroParams);
+            heroFrame.setOnClickListener(v -> { if (featured != null) openCourse(featured); });
+            heroFrame.setOnLongClickListener(v -> { if (featured == null) return false; editCourse(v, featured); return true; });
+            heroFrame.setContentDescription(s(R.string.view_hero_desc));
+
+            LinearLayout navigation = row();
+            navigation.setGravity(Gravity.CENTER_VERTICAL);
+            int navigationHeight = dp(Math.max(40, 8 + 30 * fontScale));
+            previous = nav("‹", s(R.string.view_previous_week), () -> { if (actions != null) actions.onPreviousWeek(); });
+            next = nav("›", s(R.string.view_next_week), () -> { if (actions != null) actions.onNextWeek(); });
+            weekTitle = text(s(R.string.view_this_week), 13, ink, true);
+            weekTitle.setGravity(Gravity.CENTER);
+            weekTitle.setMaxLines(2);
+            weekTitle.setEllipsize(TextUtils.TruncateAt.END);
+            weekTitle.setOnClickListener(v -> { if (actions != null) actions.onPickWeek(); });
+            weekTitle.setContentDescription(s(R.string.view_pick_week_desc));
+            navigation.addView(previous, new LinearLayout.LayoutParams(dp(38), navigationHeight));
+            navigation.addView(weekTitle, new LinearLayout.LayoutParams(0, navigationHeight, 1));
+            navigation.addView(next, new LinearLayout.LayoutParams(dp(38), navigationHeight));
+            current = text(s(R.string.view_this_week_short), 11, coral, true);
+            current.setGravity(Gravity.CENTER);
+            current.setOnClickListener(v -> { if (actions != null) actions.onCurrentWeek(); });
+            current.setContentDescription(s(R.string.view_back_to_this_week));
+            current.setMaxLines(2);
+            current.setEllipsize(TextUtils.TruncateAt.END);
+            navigation.addView(current, new LinearLayout.LayoutParams(dp(43), navigationHeight));
+            content.addView(navigation, new LinearLayout.LayoutParams(-1, navigationHeight));
+
+            LinearLayout segments = row();
+            segments.setPadding(dp(3), dp(3), dp(3), dp(3));
+            segments.setBackground(round(uiColors.inset, 13));
+            weekSegment = text(s(R.string.ui_refinement_layout_week), 12, uiColors.onAccent, true);
+            listSegment = text(s(R.string.ui_refinement_layout_list), 12, muted, true);
+            weekSegment.setGravity(Gravity.CENTER);
+            listSegment.setGravity(Gravity.CENTER);
+            weekSegment.setSingleLine(true);
+            listSegment.setSingleLine(true);
+            weekSegment.setEllipsize(TextUtils.TruncateAt.END);
+            listSegment.setEllipsize(TextUtils.TruncateAt.END);
+            segments.addView(weekSegment, new LinearLayout.LayoutParams(0, -1, 1));
+            segments.addView(listSegment, new LinearLayout.LayoutParams(0, -1, 1));
+            weekSegment.setOnClickListener(v -> selectTab(TabNavigationState.WEEK));
+            listSegment.setOnClickListener(v -> selectTab(TabNavigationState.LIST));
+            LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(14 + 22 * fontScale));
+            sp.bottomMargin = dp(9);
+            content.addView(segments, sp);
+
+        }
+
+        void addNotice() {
+            notice = text(HINT, 11, muted, false);
+            notice.setTag("timetable:notice");
+            notice.setPadding(dp(3), dp(3), dp(3), dp(3));
+            notice.setClickable(false);
+            notice.setFocusable(false);
+            LinearLayout.LayoutParams announcementParams = new LinearLayout.LayoutParams(-1, -2);
+            announcementParams.topMargin = dp(9);
+            content.addView(notice, announcementParams);
+
+        }
+
+        void updateSegment() {
+            weekSegment.setBackground(agenda ? null : round(coral, 10));
+            listSegment.setBackground(agenda ? round(coral, 10) : null);
+            weekSegment.setTextColor(agenda ? muted : uiColors.onAccent);
+            listSegment.setTextColor(agenda ? uiColors.onAccent : muted);
+            weekSegment.setPadding(dp(6), 0, dp(6), 0);
+            listSegment.setPadding(dp(6), 0, dp(6), 0);
+            weekSegment.setSelected(!agenda);
+            listSegment.setSelected(agenda);
+        }
+    }
+
     public void bind(List<Entry> newEntries, List<String> newTimes, String weekLabel,
                      boolean preview, boolean canPrevious, boolean canNext, Entry featured,
                      String featureStatus, String emptyMessage, boolean storageLocked) {
@@ -370,16 +439,17 @@ public class PastelTimetableView extends FrameLayout {
         String label = nonempty(weekLabel, s(R.string.view_teaching_week));
         // No date may be invented from a teaching-week number. The host marks the actual week.
         actualWeek = !preview && label.contains(s(R.string.view_this_week));
-        weekTitle.setText(getContext().getString(R.string.week_title_picker, label));
-        previous.setEnabled(canPrevious);
-        previous.setAlpha(canPrevious ? 1f : .3f);
-        next.setEnabled(canNext);
-        next.setAlpha(canNext ? 1f : .3f);
+        for (PageHeader header : headers) {
+            header.weekTitle.setText(getContext().getString(R.string.week_title_picker, label));
+            header.previous.setEnabled(canPrevious);
+            header.previous.setAlpha(canPrevious ? 1f : .3f);
+            header.next.setEnabled(canNext);
+            header.next.setAlpha(canNext ? 1f : .3f);
+        }
         updateModePresentation();
         grid.updateHeight();
         renderedFinishedKey = finishedKey();
-        grid.rebuild();
-        rebuildList();
+        refreshContent();
     }
 
     /** Filters presentation without changing the selected layout, backing data or reminders. */
@@ -388,41 +458,42 @@ public class PastelTimetableView extends FrameLayout {
         if (displayMode == nextMode) return;
         displayMode = nextMode;
         updateModePresentation();
-        removeCallbacks(countdownTick);
-        if (displayMode.showsCourses() && countdownTarget > 0 && isAttachedToWindow()) post(countdownTick);
-        grid.rebuild();
-        rebuildList();
+        refreshContent();
     }
 
     private void updateModePresentation() {
+        for (PageHeader header : headers) updateModePresentation(header);
+        restartCountdown();
+    }
+
+    private void updateModePresentation(PageHeader header) {
         int modeName = displayMode == DisplayMode.TIMETABLE ? R.string.ui_refinement_mode_courses
                 : displayMode == DisplayMode.AGENDA ? R.string.ui_refinement_mode_agenda : R.string.ui_refinement_mode_combined;
-        modeLabel.setText(s(R.string.ui_refinement_content_mode, s(modeName)));
-        notice.setTextColor(displayMode.showsCourses() && storageLocked ? uiColors.error : muted);
-        heroFrame.setVisibility(displayMode.showsCourses() ? VISIBLE : GONE);
-        importButton.setVisibility(displayMode.showsCourses() ? VISIBLE : GONE);
-        updateCountdown();
+        header.modeLabel.setText(s(R.string.ui_refinement_content_mode, s(modeName)));
+        header.notice.setTextColor(displayMode.showsCourses() && storageLocked ? uiColors.error : muted);
+        header.heroFrame.setVisibility(displayMode.showsCourses() ? VISIBLE : GONE);
+        header.importButton.setVisibility(displayMode.showsCourses() ? VISIBLE : GONE);
         if (!displayMode.showsCourses()) {
-            notice.setText(s(R.string.display_mode_agenda_hint));
+            header.notice.setText(s(R.string.display_mode_agenda_hint));
             return;
         }
-        status.setText(nonempty(featureStatus, preview ? s(R.string.view_status_preview) : featured == null ? s(R.string.view_status_plan) : s(R.string.view_status_schedule)));
+        header.status.setText(nonempty(featureStatus, preview ? s(R.string.view_status_preview) : featured == null ? s(R.string.view_status_plan) : s(R.string.view_status_schedule)));
         if (featured == null) {
-            heroTitle.setText(storageLocked ? s(R.string.view_hero_unavailable) : preview ? s(R.string.view_status_preview) : s(R.string.view_hero_free_time));
-            heroTime.setText(visibleEmptyMessage());
-            heroRoom.setText(storageLocked ? s(R.string.view_hero_check_storage)
+            header.heroTitle.setText(storageLocked ? s(R.string.view_hero_unavailable) : preview ? s(R.string.view_status_preview) : s(R.string.view_hero_free_time));
+            header.heroTime.setText(visibleEmptyMessage());
+            header.heroRoom.setText(storageLocked ? s(R.string.view_hero_check_storage)
                     : outsideSemester ? s(displayMode.showsEvents() ? R.string.view_hero_outside_term
                     : R.string.display_mode_course_outside_hint) : s(R.string.view_hero_long_press_add));
-            heroPeriod.setText("");
+            header.heroPeriod.setText("");
         } else {
-            heroTitle.setText(nonempty(featured.name, s(R.string.view_untitled_course)));
-            heroTime.setText(nonempty(featured.time, timeRange(featured)));
-            heroRoom.setText(nonempty(featured.room, s(R.string.view_location_tbd)));
-            heroPeriod.setText(nonempty(featured.period, featured.end > featured.start
+            header.heroTitle.setText(nonempty(featured.name, s(R.string.view_untitled_course)));
+            header.heroTime.setText(nonempty(featured.time, timeRange(featured)));
+            header.heroRoom.setText(nonempty(featured.room, s(R.string.view_location_tbd)));
+            header.heroPeriod.setText(nonempty(featured.period, featured.end > featured.start
                     ? s(R.string.view_period_range, featured.start, featured.end)
                     : s(R.string.view_period_single, featured.start)));
         }
-        notice.setText(storageLocked ? s(R.string.view_notice_storage)
+        header.notice.setText(storageLocked ? s(R.string.view_notice_storage)
                 : outsideSemester ? s(displayMode.showsEvents() ? R.string.view_notice_outside_term
                 : R.string.display_mode_course_outside_hint)
                 : preview ? s(R.string.view_notice_preview)
@@ -441,8 +512,7 @@ public class PastelTimetableView extends FrameLayout {
         String key = finishedKey();
         if (!key.equals(renderedFinishedKey)) {
             renderedFinishedKey = key;
-            grid.rebuild();
-            rebuildList();
+            refreshContent();
         } else {
             grid.invalidate();
         }
@@ -455,16 +525,65 @@ public class PastelTimetableView extends FrameLayout {
      * target to hide it.
      */
     public void setCountdown(long targetMillis, boolean untilEnd) {
-        removeCallbacks(countdownTick);
         long target = targetMillis > 0 && targetMillis != Long.MAX_VALUE ? targetMillis : -1;
         // Re-binding the same target (e.g. boundary minute) must not re-trigger the finish callback.
         if (target != countdownTarget || untilEnd != countdownUntilEnd) countdownFired = false;
         countdownTarget = target;
         countdownUntilEnd = untilEnd;
-        if (displayMode.showsCourses() && countdownTarget > 0 && isAttachedToWindow()) post(countdownTick); else updateCountdown();
+        restartCountdown();
+    }
+
+    private boolean canRunCountdown() {
+        return displayMode != null && displayMode.showsCourses() && countdownTarget > 0
+                && !preview && !storageLocked && isAttachedToWindow()
+                && getWindowVisibility() == VISIBLE && isShown();
+    }
+
+    private void stopCountdownWork() {
+        if (countdownTick != null) removeCallbacks(countdownTick);
+        if (countdownCompletion != null) {
+            removeCallbacks(countdownCompletion);
+            countdownCompletion = null;
+        }
+    }
+
+    /** Visibility callbacks may precede initialization; otherwise restart at most one chain. */
+    private void restartCountdown() {
+        stopCountdownWork();
+        if (headers == null) return;
+        updateCountdown();
+        if (canRunCountdown() && !countdownFired && countdownCompletion == null) post(countdownTick);
+    }
+
+    private void completeCountdownWhenVisible() {
+        if (!canRunCountdown() || countdownFired || countdownCompletion != null) return;
+        removeCallbacks(countdownTick);
+        if (actions == null) {
+            countdownFired = true;
+            return;
+        }
+        final long target = countdownTarget;
+        final boolean untilEnd = countdownUntilEnd;
+        countdownCompletion = new Runnable() {
+            @Override public void run() {
+                if (countdownCompletion != this) return;
+                countdownCompletion = null;
+                if (target != countdownTarget || untilEnd != countdownUntilEnd
+                        || countdownFired || !canRunCountdown()) return;
+                // Only consume completion when delivered. Hiding a window cancels queued work
+                // but leaves an undelivered expiry available when the window returns.
+                countdownFired = true;
+                actions.onCountdownFinished();
+            }
+        };
+        post(countdownCompletion);
     }
 
     private void updateCountdown() {
+        for (PageHeader header : headers) updateCountdown(header.countdown);
+    }
+
+    private void updateCountdown(TextView countdown) {
         if (!displayMode.showsCourses() || countdownTarget <= 0 || preview || storageLocked) {
             countdown.setVisibility(GONE);
             return;
@@ -473,11 +592,7 @@ public class PastelTimetableView extends FrameLayout {
         if (remaining <= 0) {
             countdown.setText(countdownUntilEnd ? s(R.string.view_countdown_ended) : s(R.string.view_countdown_started));
             countdown.setVisibility(VISIBLE);
-            if (!countdownFired) {
-                countdownFired = true;
-                removeCallbacks(countdownTick);
-                if (actions != null) post(() -> { if (displayMode.showsCourses()) actions.onCountdownFinished(); });
-            }
+            completeCountdownWhenVisible();
             return;
         }
         long seconds = (remaining + 999) / 1000;
@@ -509,84 +624,239 @@ public class PastelTimetableView extends FrameLayout {
     }
 
     @Override protected void onDetachedFromWindow() {
-        removeCallbacks(countdownTick);
+        cancelTabTransition();
+        stopCountdownWork();
         super.onDetachedFromWindow();
     }
 
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         requestApplyInsets();
-        removeCallbacks(countdownTick);
-        if (displayMode.showsCourses() && countdownTarget > 0) post(countdownTick);
+        restartCountdown();
     }
 
-    private void selectTab(int tab) {
-        if (tab == 2) { setMineSelected(true); if (actions != null) actions.onMine(); return; }
-        setMinePageVisible(false);
-        setListMode(tab == 1);
+    @Override protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+        restartCountdown();
+    }
+
+    @Override protected void onVisibilityChanged(View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        restartCountdown();
     }
 
     private View minePage;
+    private PastelCourseSheet.MinePage mineController;
 
-    /** Hosts the 「我的」 page as a full tab, sharing the bottom navigation with week and list. */
-    public void setMinePage(View page) {
-        if (minePage != null) removeView(minePage);
-        minePage = page;
-        if (page == null) return;
-        page.setBackgroundColor(background);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-1, -1);
-        lp.bottomMargin = bottomHeight;
-        addView(page, indexOfChild(bottom), lp);
-        page.setVisibility(selectedTab == 2 ? VISIBLE : GONE);
+    private View page(int tab) {
+        return tab == TabNavigationState.WEEK ? scroll : tab == TabNavigationState.LIST ? agendaScroll : minePage;
     }
 
-    public boolean isMine() { return selectedTab == 2; }
+    private void selectTab(int tab) {
+        cancelTabTransition();
+        int previous = selectedTab;
+        navigation.select(tab);
+        applySelection(previous, true);
+    }
 
-    /** Horizontal swipe: -1 = previous tab, +1 = next tab (week → list → mine). */
+    private void applySelection(int previous, boolean notifyMine) {
+        selectedTab = navigation.page();
+        if (selectedTab != TabNavigationState.MINE) listMode = selectedTab == TabNavigationState.LIST;
+        resetPageViews();
+        updateSegments();
+        if (previous != selectedTab && actions != null) {
+            actions.onTabChanged(previous, selectedTab);
+            if (notifyMine && selectedTab == TabNavigationState.MINE) actions.onMine();
+        }
+        flushContentRefresh();
+    }
+
+    /** Hosts a persistent, independently scrolling third page above the fixed bottom bar. */
+    public void setMinePage(PastelCourseSheet.MinePage page) {
+        setMinePage(page == null ? null : page.view);
+        mineController = page;
+    }
+
+    public void setMinePage(View page) {
+        cancelTabTransition();
+        mineController = null;
+        if (minePage != null) pageHost.removeView(minePage);
+        minePage = page;
+        if (page != null) {
+            page.setBackgroundColor(background);
+            pageHost.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        }
+        resetPageViews();
+    }
+
+    public boolean isMine() { return selectedTab == TabNavigationState.MINE; }
+
+    /** Left moves forward, right moves backward, including both ends of the three-page cycle. */
     public boolean canSwipeTab(int direction) {
-        int target = selectedTab + direction;
-        return target >= 0 && target <= 2;
+        return (direction == -1 || direction == 1) && page(TabNavigationState.adjacent(selectedTab, direction)) != null;
+    }
+
+    public boolean isTabSwipeStartAllowed(float rawX, float rawY) {
+        Rect bounds = new Rect();
+        if (!pageHost.getGlobalVisibleRect(bounds)) return false;
+        // Leave the system back gesture at the two screen edges to Android.
+        int edge = dp(24);
+        if (Build.VERSION.SDK_INT >= 29 && getRootWindowInsets() != null) {
+            android.graphics.Insets gestures = getRootWindowInsets().getSystemGestureInsets();
+            edge = Math.max(edge, Math.max(gestures.left, gestures.right));
+        }
+        return rawX >= bounds.left + edge && rawX < bounds.right - edge
+                && rawY >= bounds.top && rawY < bounds.bottom;
+    }
+
+    public void beginTabDrag() {
+        cancelTabTransition();
+        navigation.beginDrag();
+    }
+
+    public void dragTab(float distanceX) {
+        if (navigation.phase() != TabNavigationState.Phase.DRAGGING || pageHost.getWidth() <= 0) return;
+        navigation.drag(distanceX, pageHost.getWidth());
+        renderDrag(navigation.offset());
+    }
+
+    private void renderDrag(float offset) {
+        int origin = navigation.page(), target = navigation.target();
+        float side = target == TabNavigationState.adjacent(origin, 1) ? pageHost.getWidth() : -pageHost.getWidth();
+        for (int i = 0; i < 3; i++) {
+            View view = page(i);
+            if (view == null) continue;
+            boolean showing = i == origin || i == target;
+            view.setVisibility(showing ? VISIBLE : INVISIBLE);
+            view.setTranslationX(i == origin ? offset : i == target ? side + offset : 0f);
+            view.setImportantForAccessibility(i == origin ? IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                    : IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        }
+    }
+
+    public void endTabDrag(float velocityX, float minFlingVelocity, float minFlingDistance) {
+        if (navigation.phase() != TabNavigationState.Phase.DRAGGING) return;
+        if (pageHost.getWidth() <= 0) { cancelTabTransition(); return; }
+        navigation.release(velocityX, minFlingVelocity, minFlingDistance, pageHost.getWidth());
+        float start = navigation.offset();
+        float end = navigation.commits()
+                ? (navigation.target() == TabNavigationState.adjacent(navigation.page(), 1) ? -pageHost.getWidth() : pageHost.getWidth())
+                : 0f;
+        if (!pageAnimationsEnabled() || Math.abs(end - start) < 1f) {
+            finishTabTransition();
+            return;
+        }
+        long generation = ++transitionGeneration;
+        pageAnimator = ValueAnimator.ofFloat(start, end);
+        pageAnimator.setInterpolator(new DecelerateInterpolator(1.5f));
+        float fraction = Math.abs(end - start) / pageHost.getWidth();
+        pageAnimator.setDuration((long) (140 + 140 * fraction));
+        pageAnimator.addUpdateListener(animation -> {
+            if (generation == transitionGeneration) renderDrag((Float) animation.getAnimatedValue());
+        });
+        pageAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(Animator animation) {
+                if (generation == transitionGeneration) finishTabTransition();
+            }
+        });
+        pageAnimator.start();
+    }
+
+    private boolean pageAnimationsEnabled() {
+        if (Build.VERSION.SDK_INT >= 26) return ValueAnimator.areAnimatorsEnabled();
+        return Settings.Global.getFloat(getContext().getContentResolver(), Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f;
+    }
+
+    private void finishTabTransition() {
+        pageAnimator = null;
+        int previous = navigation.page();
+        navigation.finish();
+        applySelection(previous, true);
+    }
+
+    /** A new touch starts from the last released decision, so quick successive swipes accumulate. */
+    public void finishReleasedTabTransition() {
+        if (navigation.phase() != TabNavigationState.Phase.SETTLING) return;
+        stopPageAnimator();
+        finishTabTransition();
+    }
+
+    private void stopPageAnimator() {
+        transitionGeneration++;
+        if (pageAnimator != null) {
+            pageAnimator.removeAllListeners();
+            pageAnimator.removeAllUpdateListeners();
+            pageAnimator.cancel();
+            pageAnimator = null;
+        }
+    }
+
+    public void cancelTabTransition() {
+        stopPageAnimator();
+        navigation.cancel();
+        resetPageViews();
+        flushContentRefresh();
+    }
+
+    private void resetPageViews() {
+        for (int i = 0; i < 3; i++) {
+            View view = page(i);
+            if (view == null) continue;
+            view.setTranslationX(0f);
+            view.setAlpha(1f);
+            view.setVisibility(i == navigation.page() ? VISIBLE : INVISIBLE);
+            view.setImportantForAccessibility(i == navigation.page() ? IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                    : IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        }
+    }
+
+    @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        if (oldw != 0 && (w != oldw || h != oldh)) cancelTabTransition();
     }
 
     public void swipeTab(int direction) {
         if (!canSwipeTab(direction)) return;
-        selectTab(selectedTab + direction);
-        View shown = selectedTab == 2 && minePage != null ? minePage : scroll;
-        shown.animate().cancel();
-        shown.setAlpha(0.6f);
-        shown.setTranslationX(direction * dp(36));
-        shown.animate().alpha(1f).translationX(0).setDuration(180).start();
+        beginTabDrag();
+        dragTab(-direction * Math.max(1, pageHost.getWidth()) * .3f);
+        endTabDrag(0f, 1f, 0f);
     }
 
-    private void setMinePageVisible(boolean visible) {
-        if (minePage != null) minePage.setVisibility(visible ? VISIBLE : GONE);
-        scroll.setVisibility(visible ? GONE : VISIBLE);
-    }
-
-    private void setListMode(boolean value) {
-        listMode = value;
-        selectedTab = value ? 1 : 0;
-        grid.setVisibility(value ? GONE : VISIBLE);
-        list.setVisibility(value ? VISIBLE : GONE);
-        updateSegments();
-    }
+    private void setListMode(boolean value) { selectTab(value ? TabNavigationState.LIST : TabNavigationState.WEEK); }
 
     private void updateSegments() {
-        weekSegment.setBackground(listMode ? null : round(coral, 10));
-        listSegment.setBackground(listMode ? round(coral, 10) : null);
-        weekSegment.setTextColor(listMode ? muted : uiColors.onAccent);
-        listSegment.setTextColor(listMode ? uiColors.onAccent : muted);
-        // The actual segment width may be much narrower than the display in split-screen mode.
-        weekSegment.setPadding(dp(6), 0, dp(6), 0);
-        listSegment.setPadding(dp(6), 0, dp(6), 0);
-        weekSegment.setSelected(!listMode);
-        listSegment.setSelected(listMode);
+        for (PageHeader header : headers) header.updateSegment();
         for (int i = 0; i < tabLabels.length; i++) if (tabLabels[i] != null) {
             tabLabels[i].setTextColor(i == selectedTab ? coral : muted);
             tabIcons[i].tint = i == selectedTab ? coral : muted;
             tabIcons[i].invalidate();
             ((View) tabLabels[i].getParent()).setSelected(i == selectedTab);
         }
+    }
+
+    /** Bind mode, events and courses together, then rebuild each content page once. */
+    public void updateContent(Runnable update) {
+        contentUpdateDepth++;
+        try {
+            update.run();
+        } finally {
+            contentUpdateDepth--;
+            flushContentRefresh();
+        }
+    }
+
+    private void refreshContent() {
+        if (contentUpdateDepth > 0 || navigation.phase() != TabNavigationState.Phase.IDLE) {
+            contentRefreshPending = true;
+            return;
+        }
+        contentRefreshPending = false;
+        grid.rebuild();
+        rebuildList();
+    }
+
+    private void flushContentRefresh() {
+        if (contentRefreshPending) refreshContent();
     }
 
     private void rebuildList() {
@@ -742,22 +1012,42 @@ public class PastelTimetableView extends FrameLayout {
             dayRank[d] = dateMillis != null && dateMillis.length == 7 ? r : d;
         }
         renderedFinishedKey = finishedKey();
-        grid.rebuild();
-        rebuildList();
+        refreshContent();
     }
 
     /** Opens the 日程 list, e.g. right after adding an event so the user sees where it went. */
-    public void showAgenda() { setMinePageVisible(false); setListMode(true); }
+    public void showAgenda() { setListMode(true); }
     public boolean isAgenda() { return listMode; }
-    public int scrollPosition() { return scroll.getScrollY(); }
+    public int scrollPosition() { return listMode ? listScrollPosition() : weekScrollPosition(); }
+    public int weekScrollPosition() { return scroll.getScrollY(); }
+    public int listScrollPosition() { return agendaScroll.getScrollY(); }
+    public int mineScrollPosition() {
+        return mineController == null ? 0 : mineController.scrollPosition();
+    }
     public void restoreUiState(boolean agenda, int y) {
         setListMode(agenda);
-        scroll.post(() -> scroll.scrollTo(0, Math.max(0, y)));
+        restoreScroll(agenda ? agendaScroll : scroll, y);
+    }
+    public void restorePageScrollPositions(int weekY, int listY, int mineY) {
+        restoreScroll(scroll, weekY);
+        restoreScroll(agendaScroll, listY);
+        if (mineController != null) mineController.restoreScrollPosition(mineY);
+    }
+    private void restoreScroll(ScrollView page, int y) {
+        page.getViewTreeObserver().addOnGlobalLayoutListener(new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override public void onGlobalLayout() {
+                if (page.getHeight() <= 0 || page.getChildCount() == 0 || page.getChildAt(0).getHeight() <= 0) return;
+                page.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                page.scrollTo(0, Math.max(0, y));
+            }
+        });
+        page.requestLayout();
     }
     public void setMineSelected(boolean selected) {
-        selectedTab = selected ? 2 : listMode ? 1 : 0;
-        setMinePageVisible(selected);
-        updateSegments();
+        cancelTabTransition();
+        int previous = selectedTab;
+        navigation.select(selected ? TabNavigationState.MINE : listMode ? TabNavigationState.LIST : TabNavigationState.WEEK);
+        applySelection(previous, false);
     }
     private void addCourse(int day, int period) {
         if (!displayMode.showsCourses()) return;
@@ -795,7 +1085,7 @@ public class PastelTimetableView extends FrameLayout {
         lastHintAt = now;
         if (outsideSemester && displayMode.showsEvents()) {
             showAgenda();
-            scroll.post(() -> scroll.smoothScrollTo(0, 0));
+            agendaScroll.post(() -> agendaScroll.smoothScrollTo(0, 0));
         }
         Toast.makeText(getContext(), outsideSemester ? s(displayMode.showsEvents() ? R.string.view_toast_outside_term
                         : R.string.display_mode_course_outside_hint) : s(R.string.view_toast_long_press_add),

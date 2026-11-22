@@ -6,20 +6,15 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.ColorStateList;
-import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
-import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import androidx.appcompat.app.AlertDialog;
 
 /** Read-only inspection plus explicit user-initiated tests; no production plan is rewritten here. */
 final class ReminderStatusDialog {
@@ -27,66 +22,56 @@ final class ReminderStatusDialog {
 
     /** Caller owns showing and main-modal coordination. Do not replace the dismiss listener. */
     static Dialog create(Activity activity, Runnable onClosed) {
-        boolean dark = MainActivity.isDarkModeFor(activity);
-        int accent = MainActivity.accentColorFor(activity);
-        int ink = dark ? DarkUiPalette.INK : 0xFF25314D;
-        int secondary = dark ? DarkUiPalette.SECONDARY : 0xFF566176;
-        int cardBg = dark ? DarkUiPalette.RAISED : 0xFFF7F8FE;
-        int rowBg = dark ? DarkUiPalette.RAISED : 0xFFFFFFFF;
-        int border = dark ? DarkUiPalette.LINE : 0xFFE5E8F2;
-
-        LinearLayout body = new LinearLayout(activity);
-        body.setOrientation(LinearLayout.VERTICAL);
-        int padding = dp(activity, 20);
-        body.setPadding(padding, padding / 2, padding, padding / 2);
-        TextView report = new TextView(activity);
+        SettingsDialogStyle style = SettingsDialogStyle.of(activity);
+        LinearLayout body = style.body();
+        LinearLayout reportGroup = style.group();
+        TextView report = style.caption("");
         report.setTextIsSelectable(true);
-        report.setTextColor(ink);
-        report.setTextSize(12.5f);
+        report.setTextColor(style.colors.text);
         report.setLineSpacing(dp(activity, 3), 1f);
-        int boxPad = dp(activity, 12);
-        report.setPadding(boxPad, boxPad, boxPad, boxPad);
-        report.setBackground(rounded(cardBg, dp(activity, 14), border, dp(activity, 1)));
-        LinearLayout.LayoutParams reportParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        reportParams.bottomMargin = dp(activity, 10);
-        body.addView(report, reportParams);
-        TextView feedback = new TextView(activity);
-        feedback.setTextColor(accent);
-        feedback.setTextSize(12.5f);
-        feedback.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        feedback.setPadding(dp(activity, 2), 0, dp(activity, 2), dp(activity, 8));
+        reportGroup.addView(report, params(activity, 8));
+        TextView feedback = style.caption("");
+        feedback.setTextColor(style.colors.accent);
+        feedback.setTypeface(AppFonts.typeface(activity, Typeface.BOLD));
         feedback.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        body.addView(feedback);
+        feedback.setVisibility(View.GONE);
         Runnable refresh = () -> {
             String latest = ReminderDiagnostics.report(activity);
             if (!latest.contentEquals(report.getText())) report.setText(latest);
         };
-        action(activity, body, R.string.reminder_diag_test_now, rowBg, border, accent, true, () -> {
-            feedback.setText(ReminderDiagnostics.sendImmediateTest(activity).message(activity)); refresh.run();
-        });
-        action(activity, body, R.string.reminder_diag_test_delayed, rowBg, border, accent, true, () -> {
-            feedback.setText(ReminderDiagnostics.scheduleTest(activity, ReminderDiagnostics.DEFAULT_TEST_DELAY_MILLIS).message(activity)); refresh.run();
-        });
-        action(activity, body, R.string.reminder_diag_cancel_test, rowBg, border, secondary, false, () -> {
-            feedback.setText(ReminderDiagnostics.cancelTest(activity).message(activity)); refresh.run();
-        });
-        action(activity, body, R.string.reminder_diag_open_notifications, rowBg, border, ink, false, () -> open(activity, ReminderDiagnostics.appNotificationSettings(activity), feedback));
-        action(activity, body, R.string.reminder_diag_open_channel, rowBg, border, ink, false, () -> open(activity, ReminderDiagnostics.channelSettings(activity), feedback));
-        action(activity, body, R.string.reminder_diag_open_exact, rowBg, border, ink, false, () -> open(activity, ReminderDiagnostics.exactAlarmSettings(activity), feedback));
-        action(activity, body, R.string.reminder_diag_open_app, rowBg, border, ink, false, () -> open(activity, ReminderDiagnostics.appDetailsSettings(activity), feedback));
-        action(activity, body, R.string.reminder_diag_copy, rowBg, border, accent, false, () -> {
+        action(activity, style, reportGroup, R.string.reminder_diag_copy, () -> {
             ClipboardManager clipboard = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
             if (clipboard != null) {
                 clipboard.setPrimaryClip(ClipData.newPlainText(activity.getString(R.string.reminder_diag_title), ReminderDiagnostics.report(activity)));
-                feedback.setText(R.string.reminder_diag_copied);
+                feedback(feedback, activity.getString(R.string.reminder_diag_copied));
             }
         });
-        ScrollView scroll = new ScrollView(activity);
-        scroll.setFillViewport(false);
-        scroll.addView(body);
-        Dialog dialog = new MaterialAlertDialogBuilder(activity)
-                .setTitle(R.string.reminder_diag_title).setView(scroll)
+        body.addView(reportGroup, params(activity, 12));
+        body.addView(feedback, params(activity, 12));
+
+        LinearLayout tests = style.group();
+        tests.addView(style.heading(activity.getString(R.string.reminder_diag_test_notification_title)), params(activity, 8));
+        action(activity, style, tests, R.string.reminder_diag_test_now, () -> {
+            feedback(feedback, ReminderDiagnostics.sendImmediateTest(activity).message(activity)); refresh.run();
+        });
+        action(activity, style, tests, R.string.reminder_diag_test_delayed, () -> {
+            feedback(feedback, ReminderDiagnostics.scheduleTest(activity, ReminderDiagnostics.DEFAULT_TEST_DELAY_MILLIS).message(activity)); refresh.run();
+        });
+        action(activity, style, tests, R.string.reminder_diag_cancel_test, () -> {
+            feedback(feedback, ReminderDiagnostics.cancelTest(activity).message(activity)); refresh.run();
+        });
+        body.addView(tests, params(activity, 12));
+
+        LinearLayout settings = style.group();
+        settings.addView(style.heading(activity.getString(R.string.main_settings)), params(activity, 8));
+        action(activity, style, settings, R.string.reminder_diag_open_notifications, () -> open(activity, ReminderDiagnostics.appNotificationSettings(activity), feedback));
+        action(activity, style, settings, R.string.reminder_diag_open_channel, () -> open(activity, ReminderDiagnostics.channelSettings(activity), feedback));
+        action(activity, style, settings, R.string.reminder_diag_open_exact, () -> open(activity, ReminderDiagnostics.exactAlarmSettings(activity), feedback));
+        action(activity, style, settings, R.string.reminder_diag_open_app, () -> open(activity, ReminderDiagnostics.appDetailsSettings(activity), feedback));
+        body.addView(settings, params(activity, 0));
+
+        Dialog dialog = style.builder()
+                .setTitle(R.string.reminder_diag_title).setView(style.scrollBody(body))
                 .setPositiveButton(R.string.reminder_diag_close, (d, which) -> d.dismiss())
                 .setNeutralButton(R.string.reminder_diag_refresh, null).create();
         Handler handler = new Handler(Looper.getMainLooper());
@@ -101,17 +86,10 @@ final class ReminderStatusDialog {
             }
         };
         dialog.setOnShowListener(d -> {
-            if (dark && dialog.getWindow() != null) {
-                DialogSurfaceStyle.apply(dialog,
-                        rounded(DarkUiPalette.DIALOG_SURFACE, dp(activity, 24), border, dp(activity, 1)));
-            }
-            AppFonts.install(dialog);
-            androidx.appcompat.app.AlertDialog alert = (androidx.appcompat.app.AlertDialog) dialog;
-            Button closeBtn = alert.getButton(android.content.DialogInterface.BUTTON_POSITIVE);
-            if (closeBtn != null) closeBtn.setTextColor(accent);
+            AlertDialog alert = (AlertDialog) dialog;
+            style.apply(alert);
             Button refreshBtn = alert.getButton(android.content.DialogInterface.BUTTON_NEUTRAL);
             if (refreshBtn != null) {
-                refreshBtn.setTextColor(secondary);
                 refreshBtn.setOnClickListener(v -> refresh.run());
             }
             handler.post(update);
@@ -130,36 +108,24 @@ final class ReminderStatusDialog {
         return dialog;
     }
 
-    private static void action(Activity activity, LinearLayout body, int text,
-                               int fill, int border, int textColor, boolean primary, Runnable run) {
+    private static void action(Activity activity, SettingsDialogStyle style, LinearLayout body, int text, Runnable run) {
         Button button = new Button(activity);
         button.setText(text);
-        button.setAllCaps(false);
-        button.setTextColor(textColor);
-        button.setTextSize(14f);
-        button.setTypeface(Typeface.DEFAULT, primary ? Typeface.BOLD : Typeface.NORMAL);
-        button.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        button.setMinHeight(dp(activity, 46));
-        button.setPadding(dp(activity, 14), dp(activity, 10), dp(activity, 14), dp(activity, 10));
-        button.setStateListAnimator(null);
-        int radius = dp(activity, 12);
-        int rippleColor = Color.argb(46, Color.red(textColor), Color.green(textColor), Color.blue(textColor));
-        button.setBackground(new RippleDrawable(ColorStateList.valueOf(rippleColor),
-                rounded(fill, radius, border, dp(activity, 1)),
-                rounded(Color.WHITE, radius, Color.TRANSPARENT, 0)));
+        style.action(button, false);
         button.setOnClickListener(v -> run.run());
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(activity, 6);
-        body.addView(button, lp);
+        body.addView(button, params(activity, 6));
     }
 
-    private static GradientDrawable rounded(int fill, int radius, int stroke, int strokeWidth) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(fill);
-        d.setCornerRadius(radius);
-        if (strokeWidth > 0) d.setStroke(strokeWidth, stroke);
-        return d;
+    private static LinearLayout.LayoutParams params(Activity activity, int bottomMargin) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.bottomMargin = dp(activity, bottomMargin);
+        return params;
+    }
+
+    private static void feedback(TextView feedback, CharSequence message) {
+        feedback.setVisibility(View.VISIBLE);
+        feedback.setText(message);
     }
 
     private static int dp(Context context, float value) {
@@ -170,7 +136,7 @@ final class ReminderStatusDialog {
         try { activity.startActivity(intent); }
         catch (RuntimeException unavailable) {
             try { activity.startActivity(ReminderDiagnostics.appDetailsSettings(activity)); }
-            catch (RuntimeException noSettings) { feedback.setText(R.string.reminder_diag_settings_unavailable); }
+            catch (RuntimeException noSettings) { feedback(feedback, activity.getString(R.string.reminder_diag_settings_unavailable)); }
         }
     }
 }

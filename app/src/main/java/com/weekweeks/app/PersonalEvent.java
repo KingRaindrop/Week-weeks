@@ -6,7 +6,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * A one-off personal agenda item (e.g. "9.24 10:00 去图书馆"). Pure Java so the rules are unit-testable.
+ * A personal agenda item or recurring series (e.g. "9.24 10:00 去图书馆"). Pure Java so the rules are unit-testable.
  * Dates are stored as calendar fields, times as minutes after midnight, both in the device time zone.
  */
 final class PersonalEvent {
@@ -20,6 +20,9 @@ final class PersonalEvent {
     static final int MAX_LEAD_MINUTES = 7 * 24 * 60;
 
     long id;
+    int repeat, weekdays, until, sourceDate;
+    // A null value cancels this occurrence. Keys always refer to the original local date.
+    final java.util.Map<Integer,PersonalEvent> changes = new java.util.TreeMap<>();
     int year, month, day; // month is 1-12
     int startMinutes;
     int endMinutes = NO_END;
@@ -33,7 +36,12 @@ final class PersonalEvent {
     private static final Pattern COMPACT_TIME = Pattern.compile("^(\\d{1,2})(\\d{2})$");
 
     PersonalEvent copy() {
+        PersonalEvent e=copyFields(); e.changes.putAll(changes); return e;
+    }
+
+    PersonalEvent copyFields() {
         PersonalEvent e = new PersonalEvent();
+        e.repeat=repeat; e.weekdays=weekdays; e.until=until; e.sourceDate=sourceDate;
         e.id = id; e.year = year; e.month = month; e.day = day;
         e.startMinutes = startMinutes; e.endMinutes = endMinutes; e.remindMinutes = remindMinutes;
         e.title = title; e.location = location; e.note = note;
@@ -119,7 +127,43 @@ final class PersonalEvent {
                     "提前提醒需在 0~" + MAX_LEAD_MINUTES + " 分鐘之間",
                     "Reminder lead time must be 0–" + MAX_LEAD_MINUTES + " minutes");
         }
+        return EventSeries.validate(this);
+    }
+
+    /** Editing must reject wall-clock values skipped by a time-zone transition. */
+    String validateForEditing() {
+        String error = validate();
+        if (error != null) return error;
+        if (!localTimeExists(startMinutes)) {
+            return UiLang.t("所选日期的开始时间在当前时区不存在，请调整时间",
+                    "所選日期的開始時間在目前時區不存在，請調整時間",
+                    "The start time does not exist on this date in the current time zone. Choose another time.");
+        }
+        if (endMinutes != NO_END && !localTimeExists(endMinutes)) {
+            return UiLang.t("所选日期的结束时间在当前时区不存在，请调整时间",
+                    "所選日期的結束時間在目前時區不存在，請調整時間",
+                    "The end time does not exist on this date in the current time zone. Choose another time.");
+        }
         return null;
+    }
+
+    /** Keep this separate from stored-data validation: changing zones must not lock old records. */
+    boolean hasValidLocalTimes() {
+        return localTimeExists(startMinutes) && (endMinutes == NO_END || localTimeExists(endMinutes));
+    }
+
+    private boolean localTimeExists(int minutes) {
+        if (!validDate(year, month, day) || minutes < 0 || minutes >= 24 * 60) return false;
+        Calendar local = Calendar.getInstance();
+        local.clear();
+        local.setLenient(false);
+        local.set(year, month - 1, day, minutes / 60, minutes % 60, 0);
+        try {
+            local.getTimeInMillis();
+            return true;
+        } catch (IllegalArgumentException skippedTime) {
+            return false;
+        }
     }
 
     static boolean validDate(int year, int month, int day) {

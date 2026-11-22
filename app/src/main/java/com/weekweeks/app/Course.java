@@ -8,6 +8,9 @@ final class Course implements CourseColorRules.Item, ImportPlanner.Item {
     static final int DEFAULT_COLOR = 0xFF347B80;
 
     long id;
+    final java.util.Map<Integer, LessonSchedule.Change> changes = new java.util.TreeMap<>();
+    int sourceDate, actualDate; // only populated on displayed occurrences
+
     int day;
     int period;
     int endPeriod = 1;
@@ -71,8 +74,12 @@ final class Course implements CourseColorRules.Item, ImportPlanner.Item {
     }
 
     Course copy() {
+        Course copy = copyFields(); copy.changes.putAll(changes); return copy;
+    }
+
+    Course copyFields() {
         Course copy = new Course();
-        copy.id = id;
+        copy.id = id; copy.sourceDate = sourceDate; copy.actualDate = actualDate;
         copy.day = day;
         copy.period = period;
         copy.endPeriod = endPeriod;

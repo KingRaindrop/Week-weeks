@@ -438,6 +438,27 @@ public class PdfCourseParserTest {
                 "weekday headers must calibrate shifted/scaled columns");
     }
 
+    @Test public void numberedWeekdayHeadersAndTraditionalMetadataPreservePrintedValues() throws Exception {
+        String content = "BT 1 0 0 1 1000 700 Tm (星期１) Tj 160 0 Td (週３) Tj ET "
+                + "BT 1 0 0 1 1160 500 Tm (實作２) Tj 0 -12 Td (第０１－０２節 １－８週（單週）) Tj "
+                + "0 -12 Td (／教室：Ａ/101／授課教師：葉老師／教學班：示例) Tj ET";
+        PdfCourseParser.ParseResult result = PdfCourseParser.parseCourses(
+                realPdf(objectsWithContent(content, null)), MAX_PERIODS, MAX_STREAM, MAX_COURSES);
+        check(result.courses.size() == 1, "localized metadata must produce one course");
+        PdfCourseParser.ParsedCourse c = result.courses.get(0);
+        check(c.day == 2 && c.period == 1 && c.endPeriod == 2, "wrong weekday/period after calibration");
+        check(TimetableRules.sameWeekExpression(c.weeks, "1-8周单周"), "lost week range or parity");
+        check("實作２".equals(c.name) && "Ａ/101".equals(c.room) && "葉老師".equals(c.teacher),
+                "room, title and teacher must retain their original characters");
+    }
+
+    @Test public void oversizedPdfPeriodCannotBecomeItsLastDigit() throws Exception {
+        for (String periods : new String[]{"第101节", "第０節", "第3-02節", "第0-2节"}) {
+            String content = "BT 1 0 0 1 99.08 500 Tm (Workshop) Tj 0 -12 Td (" + periods + " 1-16周) Tj ET";
+            check(parseContent(content).courses.isEmpty(), "invalid period imported: " + periods);
+        }
+    }
+
     @Test public void testDynamicReversedRotatedWeekdayRows() throws Exception {
         String content = "BT 0 1 -1 0 700 1000 Tm (周一) Tj 0 80 Td (周二) Tj ET "
                 + "BT 0 1 -1 0 100 1000 Tm (Rotated) Tj 0 -12 TD " + METADATA_SINGLE + " ET";

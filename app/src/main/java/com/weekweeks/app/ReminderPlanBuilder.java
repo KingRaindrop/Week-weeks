@@ -9,6 +9,7 @@ import java.util.Set;
 final class ReminderPlanBuilder {
     /** Adapter for the current semester, period times and localized display labels. */
     interface CourseDetails {
+        default boolean activeChange(Course series, LessonSchedule.Change change) { return false; }
         long[] triggerTimes(Course course, long now);
         String timeLabel(Course course);
         int leadMinutes(Course course);
@@ -22,22 +23,39 @@ final class ReminderPlanBuilder {
         Set<Integer> usedRequestCodes = new HashSet<>();
         for (Course course : courses) {
             if (course.temporary || course.name == null || course.name.trim().isEmpty()) continue;
-            long[] triggers = details.triggerTimes(course, now);
-            if (triggers.length == 0) continue;
-            int code = reserve(courseRequestCode(course), usedRequestCodes);
-            entries.add(new ReminderScheduler.Entry(code, course.name, details.timeLabel(course),
-                    course.room, details.leadMinutes(course), triggers));
+            addCourse(entries, usedRequestCodes, course, details, now, courseRequestCode(course));
+            for(LessonSchedule.Change change:course.changes.values()) {
+                if(change.target==0 || !details.activeChange(course,change)) continue;
+                Course moved=LessonSchedule.project(course,change.source,change);
+                addCourse(entries,usedRequestCodes,moved,details,now,occurrenceCode(courseRequestCode(course),change.source));
+            }
         }
         for (PersonalEvent event : events) {
-            long triggerAt = event.triggerAtMillis();
-            if (triggerAt <= now) continue;
-            int code = reserve(eventRequestCode(event), usedRequestCodes);
-            entries.add(new ReminderScheduler.Entry(code, event.title, event.timeLabel(),
-                    event.location, event.remindMinutes, new long[]{triggerAt},
-                    ReminderScheduler.KIND_EVENT));
+            int baseCode=eventRequestCode(event);
+            if(event.repeat==EventSeries.ONCE) { addEvent(entries,usedRequestCodes,event,now,baseCode); continue; }
+            if(event.remindMinutes>=0) {
+                RepeatAlarm rule=RepeatAlarm.from(event);
+                if(rule.next(now,event.remindMinutes)>0) entries.add(new ReminderScheduler.Entry(reserve(baseCode,usedRequestCodes),
+                        event.title,event.timeLabel(),event.location,event.remindMinutes,new long[0],ReminderScheduler.KIND_EVENT,rule));
+            }
+            for(int source:event.changes.keySet()) {
+                PersonalEvent moved=EventSeries.occurrence(event,source);
+                if(moved!=null) addEvent(entries,usedRequestCodes,moved,now,occurrenceCode(baseCode,source));
+            }
         }
         return entries;
     }
+
+    private static void addCourse(List<ReminderScheduler.Entry> out,Set<Integer> used,Course c,CourseDetails details,long now,int code) {
+        long[] triggers=details.triggerTimes(c,now); if(triggers.length==0) return;
+        out.add(new ReminderScheduler.Entry(reserve(code,used),c.name,details.timeLabel(c),c.room,details.leadMinutes(c),triggers));
+    }
+    private static void addEvent(List<ReminderScheduler.Entry> out,Set<Integer> used,PersonalEvent e,long now,int code) {
+        if(!e.hasValidLocalTimes() || e.triggerAtMillis()<=now) return;
+        out.add(new ReminderScheduler.Entry(reserve(code,used),e.title,e.timeLabel(),e.location,e.remindMinutes,
+                new long[]{e.triggerAtMillis()},ReminderScheduler.KIND_EVENT));
+    }
+    private static int occurrenceCode(int base,int source) { return (31*base+source) & Integer.MAX_VALUE; }
 
     private static int reserve(int code, Set<Integer> used) {
         while (used.contains(code)) code = code == Integer.MAX_VALUE ? 1 : code + 1;

@@ -40,7 +40,9 @@ public class WeekEventStripFlowTest {
         assertTrue(source.contains("WeekEventLayout.hiddenCount(dayEvents.size(), expandedEvents[day])"));
         assertTrue(source.contains("if (!java.util.Arrays.equals(dayDateMillis, dateMillis)) grid.collapseEvents()"));
         String binding = source.substring(source.indexOf("public void setEvents("), source.indexOf("/** Opens the"));
-        assertTrue(binding.contains("grid.rebuild()"));
-        assertTrue(binding.contains("rebuildList()"));
+        assertTrue(binding.contains("refreshContent()"));
+        String refresh = source.substring(source.indexOf("private void refreshContent()"), source.indexOf("private void flushContentRefresh()"));
+        assertTrue(refresh.contains("grid.rebuild()"));
+        assertTrue(refresh.contains("rebuildList()"));
     }
 }

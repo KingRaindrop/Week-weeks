@@ -30,10 +30,20 @@ final class AppFonts {
 
     private AppFonts() { }
 
-    static String current(Context context) {
+    static String configured(Context context) {
         String id = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY, SYSTEM);
         for (String known : IDS) if (known.equals(id)) return id;
         return SYSTEM;
+    }
+
+    /** Report the font actually rendered, keeping the stored preference intact until confirmation. */
+    static String current(Context context) {
+        String id = configured(context);
+        return available(context, id) ? id : SYSTEM;
+    }
+
+    static boolean available(Context context, String id) {
+        return SYSTEM.equals(id) || (OPPO_SANS.equals(id) && load(context, id));
     }
 
     static String currentName(Context context) {
@@ -74,7 +84,7 @@ final class AppFonts {
     static boolean save(Context context, String id, int percent) {
         boolean known = false;
         for (String candidate : IDS) if (candidate.equals(id)) known = true;
-        if (!known) return false;
+        if (!known || !available(context, id)) return false;
         return SafePreferences.commit(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
                 new PreferenceTransaction().put(KEY, id).put(SIZE_KEY, FontSizeRules.normalize(percent)));
     }

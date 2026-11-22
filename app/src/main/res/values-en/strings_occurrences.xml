@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="scope_title">Which occurrence?</string>
+    <string name="scope_lesson">Entire course</string>
+    <string name="scope_event">Entire series</string>
+    <string name="scope_once">Only this occurrence · %1$s</string>
+    <string name="scope_lesson_edit">Change this class</string>
+    <string name="scope_stop">Cancel this class</string>
+    <string name="scope_stop_confirm">Cancel the class on %1$s and its reminder? Other classes keep their schedule.</string>
+    <string name="scope_outside">Choose a date within the current term.</string>
+    <string name="scope_dates">Originally scheduled: %1$s</string>
+    <string name="repeat_title">Repeat</string>
+    <string name="repeat_once">Does not repeat</string>
+    <string name="repeat_daily">Daily</string>
+    <string name="repeat_work">Weekdays (Mon–Fri)</string>
+    <string name="repeat_weekly">Weekly on selected days</string>
+    <string name="repeat_until">End date (inclusive)</string>
+    <string name="repeat_no_end">No end date</string>
+    <string name="repeat_end_clear">Clear end date</string>
+    <string name="repeat_pick">Choose end date</string>
+    <string name="repeat_delete_one">Delete this occurrence</string>
+    <string name="repeat_delete_one_msg">Delete only this occurrence and its reminder? Other dates stay unchanged.</string>
+    <string name="conflict_title">Schedule conflict</string>
+    <string name="conflict_keep">Save anyway</string>
+    <string name="conflict_back">Back to editing</string>
+    <string name="conflict_row">%1$s %2$s · overlaps %3$s by %4$d min</string>
+    <string name="conflict_point">%1$s %2$s · coincides with %3$s (event has no end time)</string>
+    <plurals name="conflict_count"><item quantity="one">%1$d schedule conflict</item><item quantity="other">%1$d schedule conflicts</item></plurals>
+    <string name="scope_period_order">End period must follow or equal start period</string>
+    <string name="scope_removed">This occurrence no longer exists</string>
+    <string name="scope_on_date">Class date</string>
+    <string name="scope_start_period">Start period</string>
+    <string name="scope_end_period">End period</string>
+    <string name="repeat_scope_label">Recurring event</string>
+</resources>

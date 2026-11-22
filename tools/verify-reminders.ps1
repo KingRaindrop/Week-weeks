@@ -1,4 +1,4 @@
-# Behavioral regression harness: compile the actual scheduler and both receivers against
+﻿# Behavioral regression harness: compile the actual scheduler and both receivers against
 # deterministic in-memory Android service doubles. Does not test Android IPC or Keystore.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -70,6 +70,7 @@ public class SharedPreferences {
  public boolean commitAllowed=true;
  public int failedCommits=0;
  public int commitCalls=0,failAtCommit=-1;
+ public String failKeyOnce;
  public Map<String,?> getAll(){return new HashMap<>(data);}
  public String getString(String k,String d){return (String)data.getOrDefault(k,d);}
  public boolean getBoolean(String k,boolean d){return (Boolean)data.getOrDefault(k,d);}
@@ -85,7 +86,7 @@ public class SharedPreferences {
   public Editor putStringSet(String k,Set<String> v){pending.put(k,v);return this;}
   public Editor remove(String k){pending.put(k,null);return this;}
   // Android publishes the in-memory map before the disk result, including failed commits.
-  public boolean commit(){for(String k:pending.keySet()){if(pending.get(k)==null)data.remove(k);else data.put(k,pending.get(k));}commitCalls++;if(commitCalls==failAtCommit)return false;if(failedCommits>0){failedCommits--;return false;}return commitAllowed;}
+  public boolean commit(){for(String k:pending.keySet()){if(pending.get(k)==null)data.remove(k);else data.put(k,pending.get(k));}commitCalls++;if(failKeyOnce!=null&&pending.containsKey(failKeyOnce)){failKeyOnce=null;return false;}if(commitCalls==failAtCommit)return false;if(failedCommits>0){failedCommits--;return false;}return commitAllowed;}
  }
 }
 '@
@@ -94,13 +95,16 @@ package android.content;
 import android.app.*;
 public class Context {
  public static final int MODE_PRIVATE=0;
- public static final String ALARM_SERVICE="alarm", NOTIFICATION_SERVICE="notification";
- public final SharedPreferences prefs=new SharedPreferences();
- public final AlarmManager alarms=new AlarmManager();
- public final NotificationManager notifications=new NotificationManager();
+ public static final String ALARM_SERVICE="alarm", NOTIFICATION_SERVICE="notification", ACTIVITY_SERVICE="activity";
+ public final SharedPreferences prefs;
+ public final AlarmManager alarms;
+ public final NotificationManager notifications;
+ public final ActivityManager activities;
+ public Context(){prefs=new SharedPreferences();alarms=new AlarmManager();notifications=new NotificationManager();activities=new ActivityManager();}
+ public Context(Context previous){prefs=previous.prefs;alarms=previous.alarms;notifications=previous.notifications;activities=previous.activities;}
  public int notificationPermission=0;
  public SharedPreferences getSharedPreferences(String name,int mode){return prefs;}
- public Object getSystemService(String name){return ALARM_SERVICE.equals(name)?alarms:notifications;}
+ public Object getSystemService(String name){return ALARM_SERVICE.equals(name)?alarms:ACTIVITY_SERVICE.equals(name)?activities:notifications;}
  public int checkSelfPermission(String p){return notificationPermission;}
  /** Mirrors res/values/strings_view.xml (Simplified, the default) for the ids the checks use. */
  public String getString(int id){
@@ -125,16 +129,37 @@ package android.app;
 import android.content.*; import java.util.*;
 public class PendingIntent {
  public static final int FLAG_NO_CREATE=1, FLAG_IMMUTABLE=2, FLAG_UPDATE_CURRENT=4;
- private static final Map<Context,Map<Integer,PendingIntent>> all=new IdentityHashMap<>();
+ private static final Map<AlarmManager,Map<Integer,PendingIntent>> all=new IdentityHashMap<>();
  public final Context context; public final int code; public Intent intent;
  private PendingIntent(Context c,int code,Intent i){context=c;this.code=code;intent=i;}
  public static PendingIntent getBroadcast(Context c,int code,Intent i,int flags){
-  Map<Integer,PendingIntent> map=all.computeIfAbsent(c,k->new HashMap<>());
+  Map<Integer,PendingIntent> map=all.computeIfAbsent(c.alarms,k->new HashMap<>());
   if((flags&FLAG_NO_CREATE)!=0)return map.get(code);
   PendingIntent p=map.computeIfAbsent(code,k->new PendingIntent(c,code,i));p.intent=i;return p;
  }
  public static PendingIntent getActivity(Context c,int code,Intent i,int flags){return new PendingIntent(c,code,i);}
- public void cancel(){all.get(context).remove(code);}
+ public void cancel(){all.get(context.alarms).remove(code);}
+ public static void simulateForceStop(Context c){all.remove(c.alarms);c.alarms.simulateSystemCancellation();}
+}
+'@
+'android/app/ApplicationExitInfo.java' = @'
+package android.app;
+public final class ApplicationExitInfo {
+ public static final int REASON_USER_REQUESTED=10;
+ private final int reason;private final long timestamp;
+ public ApplicationExitInfo(int reason,long timestamp){this.reason=reason;this.timestamp=timestamp;}
+ public int getReason(){return reason;}public long getTimestamp(){return timestamp;}
+}
+'@
+'android/app/ActivityManager.java' = @'
+package android.app;
+import java.util.*;
+public final class ActivityManager {
+ public boolean fail=false;
+ public final List<ApplicationExitInfo> exits=new ArrayList<>();
+ public List<ApplicationExitInfo> getHistoricalProcessExitReasons(String name,int pid,int count){
+  if(fail)throw new SecurityException("Exit information unavailable");return exits;
+ }
 }
 '@
 'android/app/AlarmManager.java' = @'
@@ -207,6 +232,7 @@ public class JSONObject {
  public long optLong(String k,long d){Object v=data.get(k);return v instanceof Number?((Number)v).longValue():d;}
  public int optInt(String k,int d){return (int)optLong(k,d);}
  public String optString(String k,String d){return (String)data.getOrDefault(k,d);}
+ public JSONObject optJSONObject(String k){return (JSONObject)data.get(k);}
  public JSONArray optJSONArray(String k){return (JSONArray)data.get(k);}
  public String toString(){String key="{"+UUID.randomUUID()+"}";saved.put(key,new HashMap<>(data));return key;}
 }
@@ -247,7 +273,10 @@ final class AppLanguage { static Context wrap(Context base){return base;} }
 'com/weekweeks/app/ReminderSourceRebuilder.java' = @'
 package com.weekweeks.app;
 /** Compilation bridge for legacy boot/update/grant checks; time-zone rebuilding has device coverage. */
-final class ReminderSourceRebuilder { static void rebuild(android.content.Context context) {} }
+final class ReminderSourceRebuilder {
+ static void rebuild(android.content.Context context) {}
+ static String sourceFingerprint(android.content.Context context){return context.prefs.getString("test_source","source-v1");}
+}
 '@
 'com/weekweeks/app/R.java' = @'
 package com.weekweeks.app;
@@ -273,6 +302,100 @@ public final class ReminderRegressionTest {
  private static void deliver(Context c,Intent i){new ClassReminderReceiver().onReceive(c,i);}
  private static void boot(Context c,String action){new ReminderBootReceiver().onReceive(c,new Intent(action));}
  private static ReminderScheduler.Entry event(int code,String title,long at){return new ReminderScheduler.Entry(code,title,"10:00","Event room",15,new long[]{at},ReminderScheduler.KIND_EVENT);}
+ private static void refresh(Context c,List<ReminderScheduler.Entry> entries,boolean courses,boolean events){
+  ReminderScheduler.refreshSchedule(c,entries,courses,events);
+ }
+ private static void foregroundRefreshChecks(){
+  long due=System.currentTimeMillis()+10_000L;
+  Context c=new Context();c.alarms.allowed=false;
+  ReminderScheduler.replaceSchedule(c,List.of(event(31,"Held event",due)));
+  Intent pending=alarm(c,31);String schedule=c.prefs.getString("class_reminder_schedule_encrypted_v1",null);
+  while(System.currentTimeMillis()<=due){try{Thread.sleep(5L);}catch(InterruptedException e){throw new AssertionError(e);}}
+  Context cold=new Context(c); // new wrapper, same persisted store and system alarm service
+  refresh(cold,List.of(),true,true);
+  check(c.alarms.pending.containsKey(31)&&alarm(c,31)==pending,"unchanged cold-start refresh preserves an already-due pending delivery");
+  check(schedule.equals(c.prefs.getString("class_reminder_schedule_encrypted_v1",null)),"unchanged refresh preserves the persisted schedule and generation");
+  deliver(cold,pending);check(c.notifications.count==1,"held due reminder remains accepted after foreground refresh");
+  c.alarms.simulateSystemCancellation();int calls=c.alarms.fallbackCalls;
+  refresh(new Context(cold),List.of(),true,true);
+  check(c.alarms.pending.isEmpty()&&c.alarms.fallbackCalls==calls&&c.notifications.count==1,"already-delivered expired reminder is never replayed by refresh");
+
+  long future=System.currentTimeMillis()+600_000L;
+  c=scheduled(32,future);pending=alarm(c,32);
+  c.prefs.edit().putString("test_source","edited-source").commit();
+  refresh(c,List.of(),true,true);
+  check(c.alarms.pending.isEmpty(),"source deletion still cancels the previous pending alarm");
+  deliver(c,pending);check(c.notifications.count==0,"source edit invalidates the old queued generation");
+  c=scheduled(32,future);pending=alarm(c,32);
+  ReminderScheduler.replaceSchedule(c,List.of(entry(32,future)));
+  deliver(c,pending);check(c.notifications.count==0,"explicit force rebuild still invalidates unchanged-source deliveries");
+
+  c=scheduled(33,future);pending=alarm(c,33);c.alarms.allowed=false;
+  refresh(c,List.of(entry(33,future)),true,true);
+  check(c.alarms.fallbackCalls==1&&alarm(c,33)!=pending,"capability change refreshes the full schedule using inexact fallback");
+  c.alarms.allowed=true;calls=c.alarms.exactCalls;
+  refresh(c,List.of(entry(33,future)),true,true);
+  check(c.alarms.exactCalls==calls+1,"capability restoration retries exact scheduling");
+
+  c=new Context();c.alarms.fail=true;
+  refresh(c,List.of(entry(34,future)),true,true);
+  check(!c.prefs.getBoolean("class_reminder_last_submission_ok",true),"failed foreground submission stays observable");
+  c.alarms.fail=false;refresh(c,List.of(entry(34,future)),true,true);
+  check(c.alarms.pending.containsKey(34),"same-source foreground refresh retries a failed submission");
+  c=new Context();c.prefs.failKeyOnce="class_reminder_submitted_generation";
+  refresh(c,List.of(entry(35,future)),true,true);calls=c.alarms.exactCalls;
+  refresh(new Context(c),List.of(entry(35,future)),true,true);
+  check(c.alarms.exactCalls==calls+1,"failed full-submission receipt cannot mark the new schedule fresh");
+
+  c=scheduled(36,future);pending=alarm(c,36);c.prefs.failedCommits=1;
+  c.prefs.edit().putString("test_source","replacement-source").commit();
+  c.prefs.failedCommits=1;
+  refresh(c,List.of(entry(37,future)),true,true);
+  check(c.alarms.pending.containsKey(36)&&alarm(c,36)==pending&&!c.alarms.pending.containsKey(37),"failed replacement persistence keeps the old pending alarm");
+  refresh(c,List.of(entry(37,future)),true,true);
+  check(!c.alarms.pending.containsKey(36)&&c.alarms.pending.containsKey(37),"later foreground refresh retries the uncommitted source change");
+  c=scheduled(38,future);pending=alarm(c,38);
+  refresh(c,List.of(),false,true);
+  check(c.alarms.pending.containsKey(38)&&alarm(c,38)!=pending,"unreadable source cannot take the same-source shortcut");
+
+  c=scheduled(39,future,future+600_000L);
+  c.alarms.fail=true;deliver(c,alarm(c,39));c.alarms.fail=false;
+  check(!c.prefs.getBoolean("class_reminder_last_submission_ok",true),"continuation failure requires a complete recovery");
+  calls=c.alarms.exactCalls;refresh(c,List.of(entry(39,future+600_000L)),true,true);
+  check(c.alarms.exactCalls==calls+1,"foreground refresh repairs a failed continuation");
+ }
+ private static void forceStopRefreshChecks(){
+  long future=System.currentTimeMillis()+600_000L;
+  Context c=scheduled(61,future);Intent obsolete=alarm(c,61);
+  c.alarms.simulateSystemCancellation(); // API30+ can retain PendingIntent records after force-stop.
+  c.activities.exits.add(new ApplicationExitInfo(ApplicationExitInfo.REASON_USER_REQUESTED,System.currentTimeMillis()));
+  refresh(new Context(c),List.of(entry(61,future)),true,true);
+  check(c.alarms.pending.containsKey(61),"force-stop with retained PendingIntent must restore the future alarm");
+  deliver(c,obsolete);check(c.notifications.count==0,"force-stop recovery rejects the old queued generation");
+  int calls=c.alarms.exactCalls;
+  c.activities.exits.clear();
+  c.activities.exits.add(new ApplicationExitInfo(ApplicationExitInfo.REASON_USER_REQUESTED,1L));
+  refresh(new Context(c),List.of(entry(61,future)),true,true);
+  check(c.alarms.exactCalls==calls,"old force-stop history cannot cause repeated foreground resubmissions");
+  c.activities.fail=true;
+  refresh(new Context(c),List.of(entry(61,future)),true,true);
+  check(c.alarms.exactCalls==calls+1,"unavailable exit history conservatively rebuilds without crashing");
+  c.activities.fail=false;
+  c.activities.exits.add(new ApplicationExitInfo(4,System.currentTimeMillis()));
+  calls=c.alarms.exactCalls;
+  refresh(new Context(c),List.of(entry(61,future)),true,true);
+  check(c.alarms.exactCalls==calls,"ordinary process exit retains live system alarms");
+  c=scheduled(62,future);c.prefs.edit().remove("class_reminder_submitted_at").commit();calls=c.alarms.exactCalls;
+  refresh(c,List.of(entry(62,future)),true,true);
+  check(c.alarms.exactCalls==calls+1,"old receipts without a force-stop baseline rebuild once");
+  Build.VERSION.SDK_INT=29;
+  c=scheduled(63,future);PendingIntent.simulateForceStop(c);
+  refresh(new Context(c),List.of(entry(63,future)),true,true);
+  check(c.alarms.pending.containsKey(63),"pre30 force-stop clears PendingIntents and future alarms must be restored");
+  calls=c.alarms.exactCalls;refresh(new Context(c),List.of(entry(63,future)),true,true);
+  check(c.alarms.exactCalls==calls,"pre30 unchanged cold-start preserves an existing future PendingIntent");
+  Build.VERSION.SDK_INT=33;
+ }
  private static void partialRebuildChecks(){
   long first=System.currentTimeMillis()+600_000L,second=first+600_000L;
   Context c=new Context();ReminderScheduler.replaceSchedule(c,List.of(entry(7,first,second),event(8,"Original event",first)));
@@ -362,6 +485,7 @@ public final class ReminderRegressionTest {
    check("提醒通知".equals(c.notifications.channel.name)&&c.notifications.channel.importance==1&&!c.notifications.channel.vibration,"existing channel renamed without resetting preferences");
   }
   public static void main(String[] args){
+  foregroundRefreshChecks();
   long first=System.currentTimeMillis()+600_000L, second=first+600_000L;
   Context c=scheduled(7,first,second); Intent old=alarm(c,7);
   ReminderScheduler.replaceSchedule(c,List.of(entry(7,first,second)));
@@ -431,6 +555,7 @@ public final class ReminderRegressionTest {
   c=scheduled(7,first,second);c.notificationPermission=-1;c.alarms.simulateSystemCancellation();boot(c,AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED);
   check(c.alarms.times.get(7)==first,"grant restoration independent of notification permission");
   timingChecks();
+  forceStopRefreshChecks();
   partialRebuildChecks();
   failedReplacementChecks();
    System.out.println("ReminderRegressionTest: "+checks+" behavioral checks passed (actual scheduler + receivers; Android service doubles).");
@@ -452,7 +577,7 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 foreach ($entry in $sources.GetEnumerator()) {
     [System.IO.File]::WriteAllText((Join-Path $out $entry.Key), $entry.Value, $utf8)
 }
-$production = @('TimetableRules.java','ReminderScheduler.java','ClassReminderReceiver.java','ReminderBootReceiver.java','ReminderDiagnostics.java','ReminderDiagnosticRules.java','PersonalEvent.java','ReminderTiming.java','UiLang.java','SafePreferences.java','PreferenceTransaction.java') |
+$production = @('TimetableRules.java','ReminderScheduler.java','ClassReminderReceiver.java','ReminderBootReceiver.java','ReminderDiagnostics.java','ReminderDiagnosticRules.java','PersonalEvent.java','EventSeries.java','ScheduleDay.java','RepeatAlarm.java','ReminderTiming.java','UiLang.java','SafePreferences.java','PreferenceTransaction.java') |
     ForEach-Object { Join-Path $root ('app\src\main\java\com\weekweeks\app\' + $_) }
 & $javac -encoding UTF-8 --release 17 -d $out @generated @production
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

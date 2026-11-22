@@ -109,6 +109,17 @@ final class StoredTimetableSnapshot {
                 course.room = text(object, "room", MAX_FIELD_LENGTH);
                 course.teacher = text(object, "teacher", MAX_FIELD_LENGTH);
                 course.color = safeColor(object.optInt("color", colors[i % colors.length]), colors);
+                if (object.has("changes")) {
+                    JSONArray changes=object.getJSONArray("changes");
+                    for (int j=0;j<changes.length();j++) {
+                        JSONObject v=changes.getJSONObject(j); int source=integer(v,"source",0), target=integer(v,"target",-1);
+                        int first=integer(v,"first",0), last=integer(v,"last",0);
+                        if (!ScheduleDay.valid(source) || course.changes.containsKey(source) || (target!=0 &&
+                                (!ScheduleDay.valid(target) || first<1 || last<first || last>maxPeriod)))
+                            throw new IllegalArgumentException("Invalid lesson change");
+                        course.changes.put(source,new LessonSchedule.Change(source,target,first,last,text(v,"room",MAX_FIELD_LENGTH)));
+                    }
+                }
                 items.add(course);
             }
             return new Courses(items, true, encryptedSource, !encryptedSource && !"[]".equals(raw), invalidWeeks, null);
@@ -130,23 +141,72 @@ final class StoredTimetableSnapshot {
                 PersonalEvent event = new PersonalEvent();
                 event.id = number(o, "id", 0L);
                 if (event.id == 0L || !ids.add(event.id)) throw new IllegalArgumentException("Invalid event identity");
-                event.year = integer(o, "year", 0); event.month = integer(o, "month", 0); event.day = integer(o, "day", 0);
-                event.startMinutes = integer(o, "start", -1);
-                event.endMinutes = integer(o, "end", PersonalEvent.NO_END);
-                event.remindMinutes = integer(o, "remind", PersonalEvent.NO_REMINDER);
-                event.title = text(o, "title", PersonalEvent.MAX_TITLE);
-                event.location = text(o, "location", PersonalEvent.MAX_LOCATION);
-                event.note = text(o, "note", PersonalEvent.MAX_NOTE);
-                if (o.has("showInTimetable") && !(o.opt("showInTimetable") instanceof Boolean))
-                    throw new IllegalArgumentException("Invalid event visibility");
-                event.showInTimetable = o.optBoolean("showInTimetable", true);
-                if (event.validate() != null) throw new IllegalArgumentException("Invalid event values");
+                readEventFields(o,event);
+                event.repeat=integer(o,"repeat",0); event.weekdays=integer(o,"weekdays",0); event.until=integer(o,"until",0);
+                if (event.validate()!=null) throw new IllegalArgumentException("Invalid event values");
+                if (o.has("changes")) {
+                    JSONArray changes=o.getJSONArray("changes");
+                    for(int j=0;j<changes.length();j++) {
+                        JSONObject ch=changes.getJSONObject(j); int source=integer(ch,"source",0);
+                        if(!ScheduleDay.valid(source) || event.repeat==0 || event.changes.containsKey(source))
+                            throw new IllegalArgumentException("Invalid repeat exception");
+                        PersonalEvent replacement=null;
+                        if(ch.has("replacement")) {
+                            replacement=new PersonalEvent(); replacement.id=event.id;
+                            readEventFields(ch.getJSONObject("replacement"),replacement);
+                            if(replacement.validate()!=null) throw new IllegalArgumentException("Invalid replacement");
+                        }
+                        event.changes.put(source,replacement);
+                    }
+                }
                 items.add(event);
             }
             return new Events(items, true);
         } catch (Exception failed) {
             return new Events(new ArrayList<>(), false);
         }
+    }
+
+    private static void readEventFields(JSONObject o,PersonalEvent event) throws Exception {
+        event.year = integer(o, "year", 0); event.month = integer(o, "month", 0); event.day = integer(o, "day", 0);
+        event.startMinutes = integer(o, "start", -1);
+        event.endMinutes = integer(o, "end", PersonalEvent.NO_END);
+        event.remindMinutes = integer(o, "remind", PersonalEvent.NO_REMINDER);
+        event.title = text(o, "title", PersonalEvent.MAX_TITLE);
+        event.location = text(o, "location", PersonalEvent.MAX_LOCATION);
+        event.note = text(o, "note", PersonalEvent.MAX_NOTE);
+        if (o.has("showInTimetable") && !(o.opt("showInTimetable") instanceof Boolean))
+            throw new IllegalArgumentException("Invalid event visibility");
+        event.showInTimetable = o.optBoolean("showInTimetable", true);
+    }
+
+    static JSONObject writeEventFields(PersonalEvent e) throws Exception {
+        return new JSONObject().put("year",e.year).put("month",e.month).put("day",e.day)
+                .put("start",e.startMinutes).put("end",e.endMinutes).put("remind",e.remindMinutes)
+                .put("title",e.title).put("location",e.location).put("note",e.note).put("showInTimetable",e.showInTimetable);
+    }
+
+    static JSONObject writeEvent(PersonalEvent e) throws Exception {
+        JSONObject obj=writeEventFields(e).put("id",e.id);
+        if(e.repeat!=EventSeries.ONCE) {
+            obj.put("repeat",e.repeat).put("weekdays",e.weekdays).put("until",e.until);
+            JSONArray changes=new JSONArray();
+            for(java.util.Map.Entry<Integer,PersonalEvent> entry:e.changes.entrySet()) {
+                JSONObject ch=new JSONObject().put("source",entry.getKey());
+                if(entry.getValue()!=null) ch.put("replacement",writeEventFields(entry.getValue()));
+                changes.put(ch);
+            }
+            if(changes.length()>0) obj.put("changes",changes);
+        }
+        return obj;
+    }
+
+    static void writeLessonChanges(JSONObject obj,Course c) throws Exception {
+        if(c.changes.isEmpty()) return;
+        JSONArray changes=new JSONArray();
+        for(LessonSchedule.Change ch:c.changes.values()) changes.put(new JSONObject().put("source",ch.source)
+                .put("target",ch.target).put("first",ch.first).put("last",ch.last).put("room",ch.room));
+        obj.put("changes",changes);
     }
 
     static List<String> readPeriodTimes(SharedPreferences prefs) {

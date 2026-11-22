@@ -81,7 +81,7 @@ final class ImportRecoveryDeviceChecks {
                 EditText end = new EditText(r); end.setText("2027-01-31");
                 CalendarSetupDialog.State state = new CalendarSetupDialog.State(true, "2026-09-01", "2027-01-31");
                 CalendarSetupDialog editor = new CalendarSetupDialog(r, state, start, end,
-                        new TextView(r), new TextView(r), System.currentTimeMillis(), System.currentTimeMillis(), (s, e) -> false);
+                        new TextView(r), new TextView(r), (s, e) -> false);
                 editor.dialog.show();
                 try {
                     editor.dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();

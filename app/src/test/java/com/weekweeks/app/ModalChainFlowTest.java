@@ -41,10 +41,13 @@ public class ModalChainFlowTest {
         for (String[] entry : owned) {
             String body = method(activity, entry[0]);
             assertTrue(entry[0], body.contains("acquireModal(") && body.contains(entry[1]));
-            assertTrue(entry[0], body.contains("showOwnedDialog(token"));
+            assertTrue(entry[0], body.contains("showOwnedDialog(token")
+                    || body.contains("showOwnedSettingsDialog(token"));
             assertFalse(entry[0] + " must not bypass ownership", body.contains(".show());"));
         }
         assertFalse("legacy draft tracker replaced owner dismiss listeners", activity.contains("trackSettingsDraft("));
+        assertTrue(method(activity, "private void showOwnedSettingsDialog(")
+                .contains("showOwnedDialog(token, dialog, false, cleanup, successor)"));
     }
 
     @Test public void backgroundResultsWaitForIdleInsteadOfCoveringAWindow() throws Exception {

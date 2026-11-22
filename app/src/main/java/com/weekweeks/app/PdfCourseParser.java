@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.InflaterInputStream;
 
 final class PdfCourseParser {
@@ -81,6 +83,8 @@ final class PdfCourseParser {
     private static final double DAY_FIRST_COLUMN_X = 99.08;
     private static final double DAY_COLUMN_WIDTH = 103.85;
     private static final int MAX_FIELD_LENGTH = 60;
+    // Only a labelled slash opens a new field. A slash inside a room/teacher value is literal.
+    private static final Pattern PDF_LABEL = Pattern.compile("[/／]\\s*([\\p{L}][\\p{L} _-]{0,23})\\s*[:：]\\s*");
 
     private PdfCourseParser() {
     }
@@ -391,17 +395,8 @@ final class PdfCourseParser {
             course.endPeriod = endPeriod;
             course.name = cleanField(name);
 
-            // 清理weeks字段：移除时间信息（如"及18:30-20:10"）
-            // Weeks may wrap into subsequent text items, including after a parity marker.
-            // Re-match the complete block rather than accepting a valid but truncated prefix.
+            // Re-match the full block so wrapped week ranges and parity survive.
             String rawWeeks = TimetableRules.matchPeriodWeeks(block, maxPeriods).trailingText;
-            if (rawWeeks != null) {
-                // 移除附带的时间格式（如“及18:30-20:10”），保留“1-6周及9-17周”。
-                rawWeeks = rawWeeks.replaceAll(
-                        "\\s*及?\\s*\\d{1,2}:\\d{2}\\s*-\\s*\\d{1,2}:\\d{2}",
-                        ""
-                ).trim();
-            }
             course.weeks = cleanPdfWeeks(rawWeeks);
             TimetableRules.WeekParseResult weekResult = TimetableRules.parseWeeks(course.weeks);
             if (!weekResult.valid) {
@@ -416,8 +411,8 @@ final class PdfCourseParser {
                 course.weeks = compactWeeks(weekResult);
             }
 
-            course.room = cleanField(extractPdfField(block, "/场地:"));
-            course.teacher = cleanField(extractPdfField(block, "/教师:"));
+            course.room = cleanField(extractPdfField(block, "场地", "場地", "教室", "地点", "地點"));
+            course.teacher = cleanField(extractPdfField(block, "教师", "教師", "老师", "老師", "授课教师", "授課教師", "任课教师", "任課教師"));
 
             if (!course.name.isEmpty()) {
                 if (parsed.size() >= maxCourses) throw PdfDocumentStreams.invalid("course count exceeds import limit");
@@ -450,7 +445,8 @@ final class PdfCourseParser {
         if (rawWeeks == null) {
             return "";
         }
-        String cleaned = rawWeeks.replaceFirst("^[\\uff09)\\s:\\uff1a]+", "").trim();
+        String cleaned = TimetableRules.scheduleNotation(rawWeeks).replace('週', '周').replace('單', '单')
+                .replace('雙', '双').replace('：', ':').replaceFirst("^[\\uff09)\\s:\\uff1a]+", "").trim();
         return cleaned
                 .replaceAll("\\s*及?\\s*\\d{1,2}:\\d{2}\\s*-\\s*\\d{1,2}:\\d{2}", "")
                 .trim();
@@ -508,7 +504,7 @@ final class PdfCourseParser {
                 return "";
             }
         }
-        String teachingClass = extractPdfField(block, "/教学班:");
+        String teachingClass = extractPdfField(block, "教学班", "教學班");
         if (teachingClass.isEmpty()) {
             return "";
         }
@@ -556,9 +552,9 @@ final class PdfCourseParser {
                     || TimetableRules.matchPeriodWeeks(current.text, 99).matched)) {
                 break;
             }
-            if (i > metadataIndex && block.indexOf("/") < 0
+            if (i > metadataIndex && block.indexOf("/") < 0 && block.indexOf("／") < 0
                     && looksLikeCourseNameLine(current.text)
-                    && !current.text.matches("[0-9\\s周单双()（）,，;；、及和~～—–至到\\-]+")) {
+                    && !TimetableRules.scheduleNotation(current.text).matches("[0-9\\s周週单双單雙()（）,，;；、及和~～—–至到\\-]+")) {
                 break;
             }
             block.append(current.text);
@@ -570,13 +566,13 @@ final class PdfCourseParser {
         String value = text.trim();
         return !value.isEmpty()
                 && weekdayHeader(value) < 0
-                && !value.contains("/")
+                && !value.contains("/") && !value.contains("／")
                 && !value.startsWith(":")
                 && !value.startsWith("：")
                 && !value.matches("^(?:学分|學分|分|教学班|教學班|考核方式)[:：].*")
                 && !value.contains("节)")
                 && !value.contains("节）")
-                && !value.matches(".*第\\d{1,2}-?\\d{0,2}节.*") // 排除包含"第X节"的行
+                && !TimetableRules.matchPeriodWeeks(value, 99).matched
                 && !value.matches("周[一二三四五六日].*") // 排除以"周X"开头的行
                 && !value.matches("\\d+")
                 && !value.startsWith("打印时间")
@@ -712,6 +708,9 @@ final class PdfCourseParser {
         String value = text.replaceAll("\\s+", "");
         String day = value.replaceFirst("^(?:星期|礼拜|禮拜|周|週)", "");
         if (day.equals(value) || day.length() != 1) return -1;
+        char c = day.charAt(0);
+        if (c >= '1' && c <= '7') return c - '1';
+        if (c >= '１' && c <= '７') return c - '１';
         int result = "一二三四五六日".indexOf(day);
         return result < 0 && "天".equals(day) ? 6 : result;
     }
@@ -725,17 +724,19 @@ final class PdfCourseParser {
         return Math.abs(x - expectedX) <= 35.0 ? day : -1;
     }
 
-    private static String extractPdfField(String block, String marker) {
-        int start = block.indexOf(marker);
-        if (start < 0) {
-            return "";
+    private static String extractPdfField(String block, String... labels) {
+        Matcher marker = PDF_LABEL.matcher(block);
+        while (marker.find()) {
+            String key = marker.group(1).trim();
+            for (String label : labels) {
+                if (label.equals(key)) {
+                    int start = marker.end();
+                    int end = marker.find() ? marker.start() : block.length();
+                    return block.substring(start, end).trim();
+                }
+            }
         }
-        start += marker.length();
-        int end = block.indexOf("/", start);
-        if (end < 0) {
-            end = block.length();
-        }
-        return block.substring(start, end).trim();
+        return "";
     }
 
     private static boolean hasUtf16TimetableEvidence(byte[] bytes) {

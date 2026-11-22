@@ -28,9 +28,12 @@ public class DialogSurfaceStyleTest {
     @Test public void bothDarkDialogPathsAndEditorOverrideUseInsetSafeStyling() throws Exception {
         String main = source("MainActivity");
         String reminder = source("ReminderStatusDialog");
+        String settings = source("SettingsDialogStyle");
         assertTrue(main.contains("DialogSurfaceStyle.apply(dialog,\n                    roundedSurface(DarkUiPalette.DIALOG_SURFACE"));
         assertTrue(main.contains("dialog.getWindow().setBackgroundDrawable(editorStyle.getBackground())"));
-        assertTrue(reminder.contains("DialogSurfaceStyle.apply(dialog,"));
+        assertTrue(reminder.contains("style.apply(alert)"));
+        assertTrue(settings.contains(".setBackgroundInsetStart(inset).setBackgroundInsetEnd(inset)"));
+        assertFalse(settings.contains("setBackgroundDrawable("));
         assertFalse(main.contains("getWindow().setBackgroundDrawable(\n                    roundedSurface(DarkUiPalette.DIALOG_SURFACE"));
         assertFalse(reminder.contains("getWindow().setBackgroundDrawable("));
     }

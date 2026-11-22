@@ -7,6 +7,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Calendar;
+import java.util.TimeZone;
 
 import org.junit.Test;
 
@@ -53,6 +54,79 @@ public class PersonalEventTest {
         e = library();
         e.remindMinutes = PersonalEvent.MAX_LEAD_MINUTES + 1;
         assertNotNull(e.validate());
+    }
+
+    @Test
+    public void editingRejectsSkippedLocalStartAndEndTimes() {
+        TimeZone original = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/Berlin"));
+            PersonalEvent event = library();
+            event.year = 2027; event.month = 3; event.day = 28;
+            event.startMinutes = 150; event.endMinutes = 180;
+            assertNull("Stored wall-clock fields remain readable", event.validate());
+            assertFalse(event.hasValidLocalTimes());
+            assertNotNull("02:30 is skipped on this date", event.validateForEditing());
+            event.startMinutes = 90; event.endMinutes = 150;
+            assertNull(event.validate());
+            assertFalse(event.hasValidLocalTimes());
+            assertNotNull("An end time in the skipped hour is invalid too", event.validateForEditing());
+            event.startMinutes = 150; event.endMinutes = PersonalEvent.NO_END;
+            assertFalse(event.hasValidLocalTimes());
+            assertNotNull(event.validateForEditing());
+        } finally { TimeZone.setDefault(original); }
+    }
+
+    @Test
+    public void editingAllowsValidSpringAndAutumnTransitionIntervals() {
+        TimeZone original = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/Berlin"));
+            PersonalEvent event = library();
+            event.year = 2027; event.month = 3; event.day = 28;
+            event.startMinutes = 90; event.endMinutes = 210;
+            assertNull(event.validateForEditing());
+            assertTrue(event.hasValidLocalTimes());
+            assertEquals(60 * 60_000L, event.endMillis() - event.startMillis());
+            event.month = 10; event.day = 31;
+            assertNull(event.validateForEditing());
+            assertTrue(event.hasValidLocalTimes());
+            assertEquals(180 * 60_000L, event.endMillis() - event.startMillis());
+            event.startMinutes = 135; event.endMinutes = 165;
+            assertNull("Repeated local times still exist", event.validateForEditing());
+            assertTrue(event.hasValidLocalTimes());
+            assertEquals(30 * 60_000L, event.endMillis() - event.startMillis());
+        } finally { TimeZone.setDefault(original); }
+    }
+
+    @Test
+    public void movingTimeZonesDoesNotInvalidateOrMutateStoredFields() {
+        TimeZone original = TimeZone.getDefault();
+        try {
+            PersonalEvent event = library();
+            event.year = 2027; event.month = 3; event.day = 28;
+            event.startMinutes = 150; event.endMinutes = 180;
+            TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+            assertNull(event.validateForEditing());
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/Berlin"));
+            assertNull("Loader validation must not lock previously saved events", event.validate());
+            assertNotNull(event.validateForEditing());
+            assertEquals(150, event.startMinutes);
+            assertEquals(180, event.endMinutes);
+            TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+            assertNull(event.validate());
+            assertNull(event.validateForEditing());
+        } finally { TimeZone.setDefault(original); }
+    }
+
+    @Test
+    public void editingRetainsExistingValidationErrors() {
+        PersonalEvent event = library();
+        event.title = "";
+        assertEquals(event.validate(), event.validateForEditing());
+        event = library();
+        event.startMinutes = -1;
+        assertEquals(event.validate(), event.validateForEditing());
     }
 
     @Test

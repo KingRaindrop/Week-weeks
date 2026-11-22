@@ -25,7 +25,11 @@ public class CalendarDatePickerTest {
     }
     @Test public void pickerIsReadOnlyBoundedAndOwnedByParent() throws Exception {
         String dialog = source("CalendarSetupDialog.java");
-        assertTrue(dialog.contains("field.setKeyListener(null); field.setFocusable(false)"));
+        // Read-only picker actions remain reachable by keyboard without requesting touch focus or an IME.
+        assertTrue(dialog.contains("field.setKeyListener(null);"));
+        assertTrue(dialog.contains("field.setFocusable(true);"));
+        assertTrue(dialog.contains("field.setFocusableInTouchMode(false);"));
+        assertTrue(dialog.contains("field.setShowSoftInputOnFocus(false);"));
         assertTrue(dialog.contains("min.set(2000, Calendar.JANUARY, 1)"));
         assertTrue(dialog.contains("max.set(2100, Calendar.DECEMBER, 31)"));
         assertTrue(dialog.contains("if (closed || (picker != null && picker.isShowing())) return;"));

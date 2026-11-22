@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 
 /**
  * One course per record: legacy pipe/tab rows, CSV quoted records, or header-mapped columns.
- * This is a row-table importer, not a recognizer for arbitrary visual timetable grids.
+ * Explicit weekday-by-period grids are dispatched before the list-column mapping.
  * Unknown columns in a recognized header are metadata; required/duplicate/conflicting columns
  * and every malformed data row are reported instead of silently discarded.
  */
@@ -26,9 +26,9 @@ final class TextTimetableParser {
 
     static final int MAX_TEXT_CHARS = 20_000;
     static final int MAX_FIELD_LENGTH = 60;
-    private static final Pattern PERIODS = Pattern.compile(
-            "^第?\\s*([1-9]\\d?)\\s*(?:(?:-|~|～|—|–|至|到)\\s*第?\\s*([1-9]\\d?))?\\s*[节節]?$"
-    );
+    private static final String PERIOD_NUMBER = "(0?[1-9]|[1-9][0-9])";
+    private static final Pattern PERIODS = Pattern.compile("^第?\\s*" + PERIOD_NUMBER
+            + "\\s*(?:[节節]?\\s*(?:-|~|～|—|–|至|到)\\s*第?\\s*" + PERIOD_NUMBER + ")?\\s*[节節]?$" );
     private static final String[] DAY_NAMES = {"一", "二", "三", "四", "五", "六", "日"};
     private static final String[][] DAY_EN = {
             {"mon", "monday"}, {"tue", "tues", "tuesday"}, {"wed", "weds", "wednesday"},
@@ -48,7 +48,7 @@ final class TextTimetableParser {
         }
     }
 
-    private static final class Row {
+    static final class Row {
         final List<String> fields;
         final int line;
         final boolean malformed;
@@ -109,8 +109,8 @@ final class TextTimetableParser {
             start = end + 1;
         }
         char delimiter = declared == '\0' ? detectDelimiter(normalized) : declared;
-        return parseRecords(tokenize(normalized, delimiter), maxPeriods, maxCourses,
-                declared == '\0' && delimiter == '\0');
+        return parseTable(tokenize(normalized, delimiter), maxPeriods, maxCourses,
+                declared == '\0' && delimiter == '\0', java.util.Collections.emptyList());
     }
 
     /**
@@ -121,6 +121,10 @@ final class TextTimetableParser {
      * weekday and periods (or start period, with optional end period) unambiguously.
      */
     static Result parseRows(List<List<String>> rows, int maxPeriods, int maxCourses) {
+        return parseRows(rows, maxPeriods, maxCourses, java.util.Collections.emptyList());
+    }
+
+    static Result parseRows(List<List<String>> rows, int maxPeriods, int maxCourses, List<WeeklyGridParser.Merge> merges) {
         if (rows == null || rows.isEmpty()) return emptyInput();
         long size = rows.size();
         if (size > MAX_TEXT_CHARS) return oversizedInput();
@@ -149,7 +153,17 @@ final class TextTimetableParser {
             records.add(new Row(cells, i + 1, false, comment));
         }
         if (size > MAX_TEXT_CHARS) return oversizedInput();
-        return parseRecords(records, maxPeriods, maxCourses, false);
+        return parseTable(records, maxPeriods, maxCourses, false, merges);
+    }
+
+    private static Result parseTable(List<Row> rows, int maxPeriods, int maxCourses, boolean legacyTail,
+                                     List<WeeklyGridParser.Merge> merges) {
+        WeeklyGridParser.Header grid = WeeklyGridParser.detect(rows);
+        if (grid != null) return WeeklyGridParser.parse(rows, grid, merges, maxPeriods, maxCourses);
+        if (!merges.isEmpty()) return errorResult(merges.get(0).ref + ": " + UiLang.t(
+                "仅能识别周课表中同一星期的纵向合并；列表请取消合并", "僅能辨識週課表中同一星期的縱向合併；清單請取消合併",
+                "Only vertical lesson merges in a weekly grid are supported. Unmerge cells in a course list"));
+        return parseRecords(rows, maxPeriods, maxCourses, legacyTail);
     }
 
     private static Result emptyInput() {
@@ -254,7 +268,7 @@ final class TextTimetableParser {
                         "Unrecognized day \"" + dayText + "\". Use 周一 ~ 周日 or Mon ~ Sun"));
                 continue;
             }
-            Matcher period = PERIODS.matcher(cell(fields, PERIOD).replace(" ", ""));
+            Matcher period = period(cell(fields, PERIOD));
             if (!period.matches()) {
                 String periodText = cell(fields, PERIOD);
                 errors.add(prefix + UiLang.t("无法识别节次「" + periodText + "」，请写成 1-2 或 3",
@@ -313,12 +327,12 @@ final class TextTimetableParser {
         return new Result(courses, errors);
     }
 
-    private static boolean blank(List<String> cells) {
+    static boolean blank(List<String> cells) {
         for (int i = 0; i < cells.size(); i++) if (!cell(cells, i).isEmpty()) return false;
         return true;
     }
 
-    private static String cell(List<String> fields, int index) {
+    static String cell(List<String> fields, int index) {
         return index >= 0 && index < fields.size() && fields.get(index) != null
                 ? fields.get(index).replace('\u00a0', ' ').trim() : "";
     }
@@ -327,18 +341,20 @@ final class TextTimetableParser {
         return cell(fields, mapping[kind]);
     }
 
+    // Fold width only in structural fields; names, room codes and teachers keep their spelling.
+    static Matcher period(String value) { return PERIODS.matcher(TimetableRules.scheduleNotation(value)); }
     private static boolean singlePeriod(String value) {
-        Matcher matcher = PERIODS.matcher(value.replace(" ", ""));
+        Matcher matcher = period(value);
         return matcher.matches() && matcher.group(2) == null;
     }
 
     private static String stripPeriod(String value) {
-        Matcher matcher = PERIODS.matcher(value.replace(" ", ""));
+        Matcher matcher = period(value);
         return matcher.matches() ? matcher.group(1) : value;
     }
 
-    private static String normalizeWeeks(String value) {
-        String weeks = value.replace('週', '周').replace('單', '单').replace('雙', '双');
+    static String normalizeWeeks(String value) {
+        String weeks = TimetableRules.scheduleNotation(value).replace('週', '周').replace('單', '单').replace('雙', '双');
         if (weeks.equalsIgnoreCase("every week") || weeks.equalsIgnoreCase("all weeks")) return "每周";
         return weeks.replaceAll("(?i)\\bweeks?\\b", "周")
                 .replaceAll("(?i)\\bodd\\b", "单").replaceAll("(?i)\\beven\\b", "双");
@@ -393,7 +409,9 @@ final class TextTimetableParser {
         int bestHeader = 0;
         char selected = '\0';
         for (int i = 0; i < delimiters.length; i++) {
-            for (Row row : tokenize(text, delimiters[i])) {
+            List<Row> sample = tokenize(text, delimiters[i], 2);
+            if (WeeklyGridParser.detect(sample) != null) return delimiters[i];
+            for (Row row : sample) {
                 if (blank(row.fields) || row.comment) continue;
                 firstRows[i] = row;
                 break;
@@ -422,13 +440,17 @@ final class TextTimetableParser {
         return recognized;
     }
 
-    private static boolean hasRequiredFields(Row row) {
+    static boolean hasRequiredFields(Row row) {
         return row != null && !row.malformed && row.fields.size() >= 3 && row.fields.size() <= 6
                 && !cell(row.fields, NAME).isEmpty() && parseDay(cell(row.fields, DAY)) >= 0
-                && PERIODS.matcher(cell(row.fields, PERIOD).replace(" ", "")).matches();
+                && period(cell(row.fields, PERIOD)).matches();
     }
 
     private static boolean recordHasTab(String text, int start) {
+        // Raw comments end at the physical newline even if their prose contains an unmatched quote.
+        int first = start;
+        while (first < text.length() && text.charAt(first) == ' ') first++;
+        if (first < text.length() && text.charAt(first) == '#') return false;
         boolean quoted = false;
         for (int i = start; i < text.length(); i++) {
             char ch = text.charAt(i);
@@ -449,6 +471,12 @@ final class TextTimetableParser {
 
     /** CSV escaping also works in TSV. Newlines inside quoted fields belong to one record. */
     private static List<Row> tokenize(String text, char delimiter) {
+        return tokenize(text, delimiter, Integer.MAX_VALUE);
+    }
+
+    private static List<Row> tokenize(String text, char delimiter, int recordLimit) {
+        int significant = 0;
+        boolean onlyPadding = true;
         List<Row> rows = new ArrayList<>();
         List<String> fields = new ArrayList<>();
         StringBuilder value = new StringBuilder();
@@ -458,11 +486,12 @@ final class TextTimetableParser {
         for (int i = 0; i <= text.length(); i++) {
             boolean eof = i == text.length();
             char ch = eof ? '\n' : text.charAt(i);
-            if (!quoted && !closed && fields.isEmpty() && value.toString().trim().isEmpty() && ch == '#') {
+            if (ch == '#' && !quoted && !closed && fields.isEmpty() && onlyPadding) {
                 int next = text.indexOf('\n', i);
                 if (next < 0) break;
                 rows.add(new Row(Arrays.asList("#"), startLine, false, true));
                 value.setLength(0);
+                onlyPadding = true;
                 i = next;
                 startLine = ++line;
                 tab = delimiter == '\0' && recordHasTab(text, i + 1);
@@ -487,24 +516,28 @@ final class TextTimetableParser {
                 fields.add(value.toString());
                 value.setLength(0);
                 closed = false;
+                onlyPadding = true;
                 if (ch == '\n') {
                     rows.add(new Row(fields, startLine, malformed));
+                    if ((malformed || !blank(fields)) && ++significant >= recordLimit) break;
                     fields = new ArrayList<>();
                     malformed = false;
                     startLine = ++line;
                     tab = delimiter == '\0' && recordHasTab(text, i + 1);
                 }
             } else if (ch == '"' && (delimiter != '\0' || tab)) {
-                if (!closed && value.toString().trim().isEmpty()) {
+                if (!closed && onlyPadding) {
                     value.setLength(0);
                     quoted = true;
                 } else {
                     malformed = true;
+                    onlyPadding = false;
                     value.append(ch);
                 }
             } else if (closed) {
                 if (!Character.isWhitespace(ch)) { malformed = true; value.append(ch); }
             } else {
+                if (ch > ' ') onlyPadding = false;
                 value.append(ch);
             }
         }
@@ -513,7 +546,7 @@ final class TextTimetableParser {
 
     static int parseDay(String value) {
         if (value == null) return -1;
-        String v = value.trim().toLowerCase(Locale.ROOT);
+        String v = TimetableRules.scheduleNotation(value).toLowerCase(Locale.ROOT);
         if (v.isEmpty()) return -1;
         if (v.endsWith(".")) v = v.substring(0, v.length() - 1);
         if (v.length() == 1 && v.charAt(0) >= '1' && v.charAt(0) <= '7') return v.charAt(0) - '1';

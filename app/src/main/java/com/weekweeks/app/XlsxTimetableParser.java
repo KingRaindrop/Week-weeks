@@ -9,6 +9,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import javax.xml.parsers.SAXParserFactory;
@@ -17,7 +19,7 @@ import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
 
-/** Bounded, non-evaluating reader for list-style XLSX timetables. No macros or formulas execute. */
+/** Bounded, non-evaluating reader for course lists and explicit weekly grids in XLSX. No macros or formulas execute. */
 final class XlsxTimetableParser {
     private static final int MAX_XML_BYTES = 2 * 1024 * 1024;
     private static final int MAX_TOTAL_BYTES = 16 * 1024 * 1024;
@@ -90,16 +92,16 @@ final class XlsxTimetableParser {
                 xml(data, reader);
                 boolean populated = false;
                 for (List<String> row : reader.rows) for (String cell : row) if (!cell.trim().isEmpty()) populated = true;
-                if (reader.unsupported) {
-                    errors.add(sheet[0] + ": " + UiLang.t("不支持合并单元格或公式，请导出为每行一门课的纯值列表", "不支援合併儲存格或公式，請匯出為每行一門課的純值清單", "Merged cells or formulas are not supported. Export a values-only course list"));
+                if (reader.unsupportedValue) {
+                    errors.add(sheet[0] + ": " + UiLang.t("含公式、布尔值或错误值，请导出为纯值课表", "含公式、布林值或錯誤值，請匯出為純值課表", "The worksheet contains formulas, booleans or errors. Export a values-only timetable"));
                     continue;
                 }
-                if (!populated) continue;
-                TextTimetableParser.Result result = TextTimetableParser.parseRows(reader.rows, maxPeriods, Math.max(0, maxCourses - courses.size()));
+                if (!populated && reader.merges.isEmpty()) continue;
+                TextTimetableParser.Result result = TextTimetableParser.parseRows(reader.rows, maxPeriods, Math.max(0, maxCourses - courses.size()), reader.merges);
                 courses.addAll(result.courses);
                 for (String error : result.errors) errors.add(sheet[0] + ": " + error);
             }
-            if (courses.isEmpty() && errors.isEmpty()) errors.add(UiLang.t("工作簿中没有可导入的课程列表", "活頁簿中沒有可匯入的課程清單", "No course list found in workbook"));
+            if (courses.isEmpty() && errors.isEmpty()) errors.add(UiLang.t("工作簿中没有可导入的课程", "活頁簿中沒有可匯入的課程", "No courses found in workbook"));
             return new TextTimetableParser.Result(courses, errors);
         } catch (Exception error) {
             throw new ImportException(UiLang.t("无法读取 XLSX：文件损坏、结构不受支持或超过安全上限", "無法讀取 XLSX：檔案損壞、結構不受支援或超過安全上限", "Cannot read XLSX: damaged, unsupported or exceeds safety limits"));
@@ -150,17 +152,37 @@ final class XlsxTimetableParser {
         reader.parse(new InputSource(new java.io.StringReader(raw)));
     }
 
+    private static final Pattern MERGE_REF = Pattern.compile("([A-Z]{1,2})([1-9][0-9]{0,3}):([A-Z]{1,2})([1-9][0-9]{0,3})");
+    private static int columnIndex(String label) {
+        int n=0;
+        for (int i=0;i<label.length();i++) n=n*26+label.charAt(i)-'A'+1;
+        return n-1;
+    }
+    private static WeeklyGridParser.Merge merge(String ref) throws SAXException {
+        Matcher m=MERGE_REF.matcher(ref==null?"":ref);
+        if (!m.matches()) throw new SAXException("Invalid merge reference");
+        int left=columnIndex(m.group(1)), right=columnIndex(m.group(3));
+        int top=Integer.parseInt(m.group(2)), bottom=Integer.parseInt(m.group(4));
+        if (left>right || right>=MAX_COLUMNS || top>bottom || bottom>MAX_ROWS) throw new SAXException("Merge range outside sheet budget");
+        return new WeeklyGridParser.Merge(ref,top,bottom,left,right);
+    }
+
     private static final class SheetReader extends DefaultHandler {
         final List<String> strings;
         final List<List<String>> rows = new ArrayList<>();
         List<String> row;
         String type;
         StringBuilder value;
-        boolean capture, unsupported, phonetic;
+        final List<WeeklyGridParser.Merge> merges = new ArrayList<>();
+        boolean capture, unsupportedValue, phonetic;
         int column, rowNumber;
         SheetReader(List<String> strings) { this.strings = strings; }
         public void startElement(String uri, String local, String q, Attributes a) throws SAXException {
-            if (local.equals("mergeCell") || local.equals("f")) unsupported = true;
+            if (local.equals("f")) unsupportedValue = true;
+            if (local.equals("mergeCell")) {
+                if (merges.size()>=MAX_ROWS) throw new SAXException("Too many merge ranges");
+                merges.add(merge(a.getValue("ref")));
+            }
             if (local.equals("row")) {
                 if (row != null) throw new SAXException("Nested rows");
                 String reference = a.getValue("r");
@@ -215,7 +237,7 @@ final class XlsxTimetableParser {
                     try { index = Integer.parseInt(text); } catch (NumberFormatException e) { throw new SAXException("Invalid string reference"); }
                     if (index < 0 || index >= strings.size()) throw new SAXException("Invalid string reference");
                     text = strings.get(index);
-                } else if ("e".equals(type) || "b".equals(type)) unsupported = true;
+                } else if ("e".equals(type) || "b".equals(type)) unsupportedValue = true;
                 while (row.size() <= column) row.add("");
                 row.set(column, text);
                 value = null;

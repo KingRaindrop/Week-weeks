@@ -13,9 +13,25 @@ final class TimetableRules {
     private static final Pattern WEEK_RANGE_PATTERN = Pattern.compile(
             "(?<!\\d)(\\d{1,2})(?:\\s*(?:-|~|～|—|–|至|到)\\s*(\\d{1,2}))?\\s*周?"
     );
+    // Capture the entire number before checking limits; matching the tail of "101节" yields a wrong lesson.
     private static final Pattern PERIOD_WEEKS_PATTERN = Pattern.compile(
-            "(?:第\\s*|[（(]?)([1-9]\\d?)(?:\\s*(?:-|~|～|—|–|至|到)\\s*([1-9]\\d?))?\\s*节\\s*[）)]?\\s*([^/\\r\\n]*)"
+            "(?<![0-9０-９])(?:第\\s*|[（(]?)([0-9０-９]++)(?:\\s*(?:-|－|﹣|~|～|—|–|至|到)\\s*([0-9０-９]++))?"
+                    + "\\s*[节節]\\s*[）)]?\\s*([^/／\\r\\n]*)"
     );
+
+    /** Normalize structural fields only: course names, rooms and teachers retain their printed text. */
+    static String scheduleNotation(String value) {
+        StringBuilder changed = null;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i), mapped = c;
+            if (c >= '０' && c <= '９') mapped = (char) ('0' + c - '０');
+            else if (c == '－' || c == '﹣') mapped = '-';
+            else if (c == '　' || c == '\u00a0') mapped = ' ';
+            if (mapped != c && changed == null) changed = new StringBuilder(value);
+            if (mapped != c) changed.setCharAt(i, mapped);
+        }
+        return (changed == null ? value : changed.toString()).trim();
+    }
 
     enum TemporalState {
         UNAVAILABLE,
@@ -138,15 +154,16 @@ final class TimetableRules {
     }
 
     static PeriodMatch matchPeriodWeeks(String text, int maxPeriods) {
-        if (text == null) {
+        if (text == null || (text.indexOf('节') < 0 && text.indexOf('節') < 0)) {
             return PeriodMatch.notMatched();
         }
         Matcher matcher = PERIOD_WEEKS_PATTERN.matcher(text);
         if (!matcher.find()) {
             return PeriodMatch.notMatched();
         }
-        int start = parseInt(matcher.group(1));
-        int end = matcher.group(2) == null ? start : parseInt(matcher.group(2));
+        String first = matcher.group(1), last = matcher.group(2);
+        int start = first.length() <= 2 ? parseInt(first) : -1;
+        int end = last == null ? start : last.length() <= 2 ? parseInt(last) : -1;
         String trailingText = matcher.group(3) == null ? "" : matcher.group(3);
         boolean valid = start >= 1 && end >= start && end <= maxPeriods;
         return new PeriodMatch(true, valid, start, end, trailingText);

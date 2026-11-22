@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -44,31 +45,37 @@ final class CalendarSetupDialog {
     final AlertDialog dialog;
     final State state;
     private final Activity activity;
+    private final SettingsDialogStyle style;
     private final EditText startInput, endInput;
-    private final long fallbackStart, fallbackEnd;
     private DatePickerDialog picker;
     private boolean closed;
 
     CalendarSetupDialog(Activity activity, State state, EditText startInput, EditText endInput,
-                        View startLabel, View endLabel, long fallbackStart, long fallbackEnd, Saver saver) {
+                        View startLabel, View endLabel, Saver saver) {
         this.activity = activity; this.state = state;
+        this.style = SettingsDialogStyle.of(activity);
         this.startInput = startInput; this.endInput = endInput;
-        this.fallbackStart = fallbackStart; this.fallbackEnd = fallbackEnd;
-        LinearLayout form = new LinearLayout(activity);
-        form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(4), dp(8), dp(4), 0);
+        LinearLayout body = style.body();
+        TextView explanation = style.caption(activity.getString(state.firstRun
+                ? R.string.main_welcome_calendar_message : R.string.main_calendar_message));
+        body.addView(explanation, params(12));
+        LinearLayout form = style.group();
+        style.field(startInput); style.field(endInput);
         configureField(startInput, 1); configureField(endInput, 2);
-        form.addView(startLabel); form.addView(startInput, params());
-        form.addView(endLabel); form.addView(endInput, params());
-        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(activity)
+        form.addView(dateLabel(startLabel, startInput), params(6));
+        form.addView(startInput, params(16));
+        form.addView(dateLabel(endLabel, endInput), params(6));
+        form.addView(endInput, params(0));
+        body.addView(form, params(0));
+        MaterialAlertDialogBuilder builder = style.builder()
                 .setTitle(state.firstRun ? R.string.main_welcome_calendar_title : R.string.main_calendar_settings)
-                .setMessage(state.firstRun ? R.string.main_welcome_calendar_message : R.string.main_calendar_message)
-                .setView(form).setPositiveButton(R.string.action_save, null);
+                .setView(style.scrollBody(body)).setPositiveButton(R.string.action_save, null);
         if (!state.firstRun) builder.setNegativeButton(R.string.action_cancel, (d, which) -> state.finished = true);
         dialog = builder.create();
         dialog.setCancelable(!state.firstRun);
         dialog.setOnCancelListener(d -> state.finished = true);
         dialog.setOnShowListener(d -> {
+            style.apply(dialog);
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 capture();
                 Long start = parseDateMillis(state.start), end = parseDateMillis(state.end);
@@ -100,16 +107,33 @@ final class CalendarSetupDialog {
     }
 
     private void configureField(EditText field, int which) {
-        field.setKeyListener(null); field.setFocusable(false); field.setCursorVisible(false);
+        // These controls open a picker rather than accept text. Keep hardware-keyboard
+        // traversal, without consuming the first touch solely to focus an EditText.
+        field.setKeyListener(null);
+        field.setMovementMethod(null);
+        field.setCursorVisible(false);
+        field.setShowSoftInputOnFocus(false);
+        field.setLongClickable(false);
+        field.setFocusable(true);
+        field.setFocusableInTouchMode(false);
+        if (field.getId() == View.NO_ID) field.setId(View.generateViewId());
+        field.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host,
+                    android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.setClassName(android.widget.Button.class.getName());
+                info.setEditable(false);
+            }
+        });
         field.setOnClickListener(v -> openPicker(which, false));
     }
 
     private void openPicker(int which, boolean restored) {
         if (closed || (picker != null && picker.isShowing())) return;
         EditText field = which == 1 ? startInput : endInput;
+        // Each new visit starts at today's local date, even when the field holds an old term date.
+        // Recreating an open picker must retain the date the user is currently choosing instead.
         Calendar initial = Calendar.getInstance();
-        Long selected = parseDateMillis(field.getText().toString());
-        initial.setTimeInMillis(selected != null ? selected : which == 1 ? fallbackStart : fallbackEnd);
         if (restored && state.year >= 2000 && state.year <= 2100)
             initial.set(state.year, state.month, state.day);
         Calendar min = Calendar.getInstance(); min.clear(); min.set(2000, Calendar.JANUARY, 1);
@@ -128,17 +152,22 @@ final class CalendarSetupDialog {
         });
         picker = child;
         child.show();
-        int accent = MainActivity.accentColorFor(activity);
-        boolean dark = MainActivity.isDarkModeFor(activity);
         android.widget.Button ok = child.getButton(android.content.DialogInterface.BUTTON_POSITIVE);
-        if (ok != null) ok.setTextColor(accent);
+        if (ok != null) ok.setTextColor(style.colors.accent);
         android.widget.Button cancel = child.getButton(android.content.DialogInterface.BUTTON_NEGATIVE);
-        if (cancel != null) cancel.setTextColor(dark ? DarkUiPalette.SECONDARY : 0xFF566176);
+        if (cancel != null) cancel.setTextColor(style.colors.secondary);
         AppFonts.install(child);
     }
+    private View dateLabel(View supplied, EditText target) {
+        View label = supplied instanceof TextView ? style.heading(((TextView) supplied).getText()) : supplied;
+        label.setLabelFor(target.getId());
+        return label;
+    }
     private int dp(int value) { return Math.round(value * activity.getResources().getDisplayMetrics().density); }
-    private LinearLayout.LayoutParams params() {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2); p.bottomMargin = dp(4); return p;
+    private LinearLayout.LayoutParams params(int bottomMargin) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
+        p.bottomMargin = dp(bottomMargin);
+        return p;
     }
     private void toast(int resource) { Toast.makeText(activity, resource, Toast.LENGTH_SHORT).show(); }
     static String formatDate(long millis) {

@@ -4,9 +4,52 @@ import org.junit.Test;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.TimeZone;
+import java.util.HashMap;
+import java.util.Map;
 import static org.junit.Assert.*;
 
 public class ReminderSourceRebuilderTest {
+    @Test public void foregroundFingerprintTracksSourcesButIgnoresPresentationAndSubmissionMetadata() {
+        TimeZone zone = TimeZone.getTimeZone("Asia/Shanghai");
+        Map<String, Object> sources = new HashMap<>();
+        sources.put(StoredTimetableSnapshot.COURSES_KEY, "encrypted courses");
+        sources.put(StoredTimetableSnapshot.EVENTS_KEY, "encrypted events");
+        String expected = ReminderSourceRebuilder.sourceFingerprint(sources, zone);
+        assertNotNull(expected);
+        assertEquals(64, expected.length());
+        sources.put("display_mode", "agenda");
+        sources.put("class_reminder_schedule_encrypted_v1", "new generated plan");
+        sources.put("class_reminder_last_submission_at", 123L);
+        sources.put("font_scale", 1.2f);
+        assertEquals(expected, ReminderSourceRebuilder.sourceFingerprint(sources, zone));
+        for (String key : Arrays.asList(StoredTimetableSnapshot.COURSES_KEY,
+                StoredTimetableSnapshot.LEGACY_COURSES_KEY, StoredTimetableSnapshot.EVENTS_KEY,
+                StoredTimetableSnapshot.PERIOD_TIMES_KEY, "calendar_start_millis", "calendar_end_millis",
+                AcademicCalendarStore.TIME_ZONE_KEY, "notifications_enabled")) {
+            Map<String, Object> changed = new HashMap<>(sources);
+            changed.put(key, "changed " + key);
+            assertNotEquals(key, expected, ReminderSourceRebuilder.sourceFingerprint(changed, zone));
+        }
+        assertNotEquals(expected, ReminderSourceRebuilder.sourceFingerprint(sources, TimeZone.getTimeZone("Europe/Berlin")));
+    }
+
+    @Test public void foregroundFingerprintSeparatesFieldBoundariesAndAbsentValues() {
+        TimeZone zone = TimeZone.getTimeZone("UTC");
+        Map<String, Object> left = new HashMap<>(), right = new HashMap<>();
+        left.put(StoredTimetableSnapshot.COURSES_KEY, "a|b");
+        left.put(StoredTimetableSnapshot.EVENTS_KEY, "c");
+        right.put(StoredTimetableSnapshot.COURSES_KEY, "a");
+        right.put(StoredTimetableSnapshot.EVENTS_KEY, "b|c");
+        assertNotEquals(ReminderSourceRebuilder.sourceFingerprint(left, zone),
+                ReminderSourceRebuilder.sourceFingerprint(right, zone));
+        right = new HashMap<>(left);
+        right.put(StoredTimetableSnapshot.PERIOD_TIMES_KEY, "");
+        assertNotEquals(ReminderSourceRebuilder.sourceFingerprint(left, zone),
+                ReminderSourceRebuilder.sourceFingerprint(right, zone));
+        assertEquals(ReminderSourceRebuilder.sourceFingerprint(left, zone),
+                ReminderSourceRebuilder.sourceFingerprint(new HashMap<>(left), zone));
+    }
+
     private static long date(int y, int m, int d) {
         Calendar c = Calendar.getInstance(); c.clear(); c.set(y, m - 1, d); return c.getTimeInMillis();
     }

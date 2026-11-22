@@ -41,6 +41,7 @@ public final class ParserDeviceTest extends Instrumentation {
                     "2\t5\t6\t1-8周,10-16周\t示例楼C303\t示例教师丙\t虚构实验",
                     "3\t7\t8\t2-16周双周\t示例楼D404\t示例教师丁\t虚构设计")),
                     "Synthetic PDF fields, including cross-page course title");
+            checkWeeklyGrid();
             String text = "课程名,星期,节次\n高等数学,周一,1-2";
             check("高等数学".equals(parse(text.getBytes(Charset.forName("GB18030")), "gb.csv").courses.get(0).name), "GB18030 decoder");
             byte[] utf16 = text.getBytes(StandardCharsets.UTF_16LE);
@@ -50,7 +51,7 @@ public final class ParserDeviceTest extends Instrumentation {
             rejects((text + "\nBroken,Mondayish,3").getBytes(StandardCharsets.UTF_8), "bad.csv");
             rejects(workbook(StandardCharsets.UTF_8), "dtd.xlsx");
             rejects(workbook(StandardCharsets.UTF_16LE), "encoding.xlsx");
-            result.putString("stream", "PARSER PASS: Android XLSX SAX/ZIP, synthetic PDF full fields and cross-page title, CSV full-field equivalence, GB18030/UTF-16, all-or-nothing errors and XML DTD/encoding rejection. No UI/file-provider coverage.\n");
+            result.putString("stream", "PARSER PASS: merged weekly grid and pasted TSV full-field equivalence, ambiguous grid coordinates, Android XLSX SAX/ZIP, synthetic PDF full fields and cross-page title, CSV full-field equivalence, GB18030/UTF-16, all-or-nothing errors and XML DTD/encoding rejection. No UI/file-provider coverage.\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable failure) {
             result.putString("stream", android.util.Log.getStackTraceString(failure));
@@ -72,7 +73,36 @@ public final class ParserDeviceTest extends Instrumentation {
         try { parse(bytes, name); } catch (ImportException expected) { return; }
         throw new AssertionError("Unsafe or malformed input accepted: " + name);
     }
+    private static String gridCell(String value) {
+        return "<c t=\"inlineStr\"><is><t>" + value + "</t></is></c>";
+    }
+    private void checkWeeklyGrid() throws Exception {
+        String lesson = "合成課Ａ\n週次：１－８週（單週）\n教室：Ａ/101\n教師：甲";
+        String sheet = "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row>"
+                + gridCell("節次") + gridCell("週五") + gridCell("Mon.") + "</row><row>"
+                + gridCell("１") + gridCell(lesson) + "</row><row>" + gridCell("２") + "</row><row>"
+                + gridCell("３") + gridCell("") + gridCell("合成課Ｂ") + "</row></sheetData>"
+                + "<mergeCells><mergeCell ref=\"B2:B3\"/></mergeCells></worksheet>";
+        String part = "xl/worksheets/sheet1.xml";
+        TimetableFileParser.Result grid = parse(rewrite(part, ignored -> sheet.getBytes(StandardCharsets.UTF_8)), "grid.xlsx");
+        TextTimetableParser.Result pasted = TextTimetableParser.parse("節次\t週五\tMon.\n１－２\t\"" + lesson
+                + "\"\t\n３\t\t合成課Ｂ", 16, 500);
+        check(grid.courses.size() == 2 && pasted.errors.isEmpty() && pasted.courses.size() == 2, "Weekly grid count");
+        check(equal(grid.courses.get(0), pasted.courses.get(0)) && equal(grid.courses.get(1), pasted.courses.get(1)), "Weekly grid fields");
+        PdfCourseParser.ParsedCourse a = grid.courses.get(0);
+        check(a.day == 4 && a.period == 1 && a.endPeriod == 2 && "Ａ/101".equals(a.room)
+                && TimetableRules.sameWeekExpression(a.weeks, "1-8周单周"), "Weekday, merged periods and weeks");
+        try {
+            parse(rewrite(part, ignored -> sheet.replace("B2:B3", "B2:C2").getBytes(StandardCharsets.UTF_8)), "ambiguous.xlsx");
+            throw new AssertionError("Cross-day merge accepted");
+        } catch (ImportException expected) { check(expected.getMessage().contains("B2:C2"), "Missing merge coordinates"); }
+    }
+    private interface XmlEdit { byte[] apply(String source); }
     private byte[] workbook(Charset charset) throws Exception {
+        return rewrite("xl/workbook.xml", xml -> ("<!DOCTYPE workbook [<!ENTITY injected \"x\">]>"
+                + xml.replaceFirst("^<\\?xml[^>]*\\?>", "")).getBytes(charset));
+    }
+    private byte[] rewrite(String part, XmlEdit edit) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (java.util.zip.ZipInputStream input = new java.util.zip.ZipInputStream(
                 new java.io.ByteArrayInputStream(asset("timetable-list-template.xlsx")));
@@ -82,10 +112,7 @@ public final class ParserDeviceTest extends Instrumentation {
                 ByteArrayOutputStream data = new ByteArrayOutputStream(); int read;
                 while ((read = input.read(buffer)) != -1) data.write(buffer, 0, read);
                 byte[] bytes = data.toByteArray();
-                if ("xl/workbook.xml".equals(entry.getName())) {
-                    String xml = new String(bytes, StandardCharsets.UTF_8).replaceFirst("^<\\?xml[^>]*\\?>", "");
-                    bytes = ("<!DOCTYPE workbook [<!ENTITY injected \"x\">]>" + xml).getBytes(charset);
-                }
+                if (part.equals(entry.getName())) bytes = edit.apply(new String(bytes, StandardCharsets.UTF_8));
                 zip.putNextEntry(new ZipEntry(entry.getName())); zip.write(bytes); zip.closeEntry();
             }
         }

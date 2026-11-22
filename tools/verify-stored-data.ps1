@@ -1,4 +1,4 @@
-# Runs the actual loader against controlled preferences, crypto and JSON object-graph doubles.
+﻿# Runs the actual loader against controlled preferences, crypto and JSON object-graph doubles.
 # This tests completeness/identity validation, not JSON syntax, Keystore or Android persistence.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -31,6 +31,8 @@ public final class JSONObject {
  public JSONObject put(String key,Object value){values.put(key,value);return this;}
  public boolean has(String key){return values.containsKey(key);}
  public boolean isNull(String key){return !values.containsKey(key)||values.get(key)==NULL||values.get(key)==null;}
+ public JSONArray getJSONArray(String k){return (JSONArray)get(k);}
+ public JSONObject getJSONObject(String k){return (JSONObject)get(k);}
  public Object opt(String key){return values.get(key);}
  public Object get(String key){if(!values.containsKey(key))throw new IllegalArgumentException();return values.get(key);}
  public long optLong(String key,long fallback){Object v=values.get(key);return v instanceof Number?((Number)v).longValue():fallback;}
@@ -119,7 +121,7 @@ foreach ($entry in $sources.GetEnumerator()) {
     [System.IO.File]::WriteAllText($path, $entry.Value, $utf8)
     $generated += $path
 }
-$names = @('StoredTimetableSnapshot','Course','CourseColorRules','CoursePalette','ImportPlanner','PdfCourseParser','PdfDocumentStreams','ImportException','PersonalEvent','TimetableRules','UiLang')
+$names = @('StoredTimetableSnapshot','Course','CourseColorRules','CoursePalette','ImportPlanner','PdfCourseParser','PdfDocumentStreams','ImportException','PersonalEvent','LessonSchedule','ScheduleDay','EventSeries','AgendaDates','TimetableRules','UiLang')
 $production = $names | ForEach-Object { Join-Path $root ('app\src\main\java\com\weekweeks\app\' + $_ + '.java') }
 & (Join-Path $env:JAVA_HOME 'bin\javac.exe') -encoding UTF-8 --release 17 -d $out @generated @production
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

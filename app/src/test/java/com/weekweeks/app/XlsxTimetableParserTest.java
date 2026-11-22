@@ -161,6 +161,33 @@ public class XlsxTimetableParserTest {
         assertEquals("# Seminar", result.courses.get(0).name);
     }
 
+    private static Map<String,String> gridBook(String merges, String rows) {
+        Map<String,String> files=workbook(rows);
+        String sheet="xl/worksheets/sheet1.xml";
+        files.put(sheet,files.get(sheet).replace("</worksheet>","<mergeCells>"+merges+"</mergeCells></worksheet>"));
+        return files;
+    }
+    private static String merge(String address) { return "<mergeCell ref=\""+address+"\"/>"; }
+    private static final String GRID_HEAD=row(cell("節次")+cell("週四")+cell("星期二"));
+    @Test public void weeklyGridResolvesTitleAndVerticalMergesUsingActualPeriodLabels() throws Exception {
+        String rows=row(cell("示例課程表"))+GRID_HEAD+row(cell("第０１節")+cell("A/B 設計\n週次：１－８週（單週）\n教室：A/101\n教師：Lin"))+row(cell("2-3")+cell("")+cell("Math"));
+        TimetableFileParser.Result result=TimetableFileParser.parse(zip(gridBook(merge("A1:C1")+merge("B3:B4"),rows)),"grid.xlsx",16,1048576,30);
+        assertEquals(2,result.courses.size());PdfCourseParser.ParsedCourse a=result.courses.get(0);
+        assertEquals("A/B 設計",a.name);assertEquals(3,a.day);assertEquals(1,a.period);assertEquals(3,a.endPeriod);
+        assertTrue(TimetableRules.parseWeeks(a.weeks).weeks[7]);assertFalse(TimetableRules.parseWeeks(a.weeks).weeks[2]);
+        assertEquals("A/101",a.room);assertEquals("Lin",a.teacher);
+        PdfCourseParser.ParsedCourse b=result.courses.get(1);assertEquals(1,b.day);assertEquals(2,b.period);assertEquals(3,b.endPeriod);
+    }
+    @Test public void badGridMergesCannotHideDataOrInventAWeekdayOrPeriod() throws Exception {
+        String valid=GRID_HEAD+row(cell("1")+cell("Math"))+row(cell("2")+cell(""));
+        String[] merges={merge("B2:C2"),merge("B2:B4"),merge("B2:B3")+merge("B2:B3"),merge("B2:B3"),merge("B2:B3"),merge("A2:A3")};
+        String[] rows={valid,valid,valid,GRID_HEAD+row(cell("1")+cell("Math"))+row(cell("2")+cell("Hidden")),
+                GRID_HEAD+row(cell("1")+cell("Math"))+row(cell("3")),valid};
+        for(int i=0;i<rows.length;i++) {
+            try{TimetableFileParser.parse(zip(gridBook(merges[i],rows[i])),"grid.xlsx",16,1048576,30);fail("ambiguous merge "+i);}
+            catch(ImportException e){assertTrue(e.getMessage(),e.getMessage().contains("Courses"));}
+        }
+    }
     private static void rejects(Map<String, String> files) throws Exception {
         try { parse(files); fail("Expected import error"); }
         catch (ImportException expected) { assertFalse(expected.getMessage().isEmpty()); }

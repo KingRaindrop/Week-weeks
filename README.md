@@ -62,7 +62,9 @@
 
 ### 日程：给生活留一点位置
 
-- 添加一次性的个人安排，支持日期、开始／结束时间、地点和备注。
+- 个人日程可设为一次、每天、工作日（周一至周五）或每周指定星期，可选截止日期（含当天）。编辑重复日程可选「仅本次」或「整个重复日程」。
+- 在课程详情选择编辑或长按课卡，可选择「仅本次」调日期、节次、教室或停课，也可编辑整门课程。本次变动会更新课表和提醒。
+- 保存课程或日程前会列出与另一类安排重叠的日期、时段和分钟数，可滚动查看全部冲突，再返回修改或继续保存。
 - 日程模式的周视图使用时间轴，卡片高度随时长变化；不足 30 分钟或未填写结束时间的安排保留相当于 30 分钟的最小显示高度，实际时间不被改写。
 - 重叠安排可并排显示；空间不足时显示数量角标，超过 99 项显示 `99+`，点开仍可选择全部安排。每天的 `＋` 可直接添加当天日程。
 - 编辑时实时显示时间范围与时长，并提示「未设结束时间」、时间格式或先后顺序错误；输入不会被自动改写。
@@ -73,7 +75,7 @@
 
 - 通过系统文件选择器导入 **PDF、XLSX、CSV、TSV、TXT**，不申请广泛的存储读写权限。
 - 支持粘贴文本课表；文件和粘贴导入都先预览、确认，再保存。
-- XLSX 与文本表格采用每行一门课的列表格式，可使用 [XLSX 模板](<docs/templates/timetable-list-template.xlsx>) 或 [CSV 模板](<docs/templates/timetable-list-template.csv>)。旧版 `.xls` 需先另存为 XLSX 或 CSV。
+- XLSX、CSV、TSV 和粘贴文本既支持每行一门课的列表（[XLSX 模板](<docs/templates/timetable-list-template.xlsx>)、[CSV 模板](<docs/templates/timetable-list-template.csv>)），也支持[横排星期、纵排节次的周课表](<docs/IMPORT-PARSERS-20261119.md>)。Excel 可在同一星期列纵向合并连续节次；复制或导出文本时请把连堂节次写成 `1-2`。旧版 `.xls` 需先另存为 XLSX 或 CSV。
 - PDF 解析对排版有要求，不是所有学校格式都能识别；不支持扫描件 OCR。
 - 支持常见简体、繁体、英文表头及 `周一`／`Mon` 等星期写法；详细格式和限制见 [导入说明](<docs/IMPORT-PARSERS-20261114.md>) 与 [解析兼容性补充](<docs/IMPORT-PARSERS-20261115.md>)。
 
@@ -115,13 +117,15 @@
 
 正式应用包名为 `com.weekweeks.app`。开发版与正式版均使用同一套最新界面，不再区分“原版／清新版”；内部 `pastel` 构建仅为兼容测试入口，不是另一个产品版本。不同包名的数据不自动迁移，更名前的旧应用也不会被自动卸载。
 
-当前源码版本为 **1.2.8**（`versionCode 11`）。
+当前源码版本为 **1.2.9**（`versionCode 12`）。
 
-下载：[Week weeks 1.2.8 APK](https://github.com/KingRaindrop/Week-weeks/releases/download/v1.2.8/week-weeks-1.2.8.apk) · [GitHub Release 页面](https://github.com/KingRaindrop/Week-weeks/releases/tag/v1.2.8)。也可以按下面的方式自行构建。
+下载：[Week weeks 1.2.9 APK](https://github.com/KingRaindrop/Week-weeks/releases/download/v1.2.9/week-weeks-1.2.9.apk) · [GitHub Release 页面](https://github.com/KingRaindrop/Week-weeks/releases/tag/v1.2.9)。也可以按下面的方式自行构建。
 
 官方 APK 不包含本地 OPPO Sans 字体文件；该字体不可用时使用系统字体。
 
 ## 本轮更新与验证
+
+v1.2.9 新增单次调课与停课、重复日程和课程／日程冲突提示。Excel、CSV、TSV、TXT 和粘贴文本可以直接识别带星期与节次表头的周课表；文字型 PDF 改善了繁体、全角数字和教室字段兼容性。Debug 和 Release 各通过 **416 项单元测试**，Release Lint 为 **0 错误、7 项既有警告**；MuMu 验证了调课、重复日程、提醒恢复与导入预览。
 
 2026-11-16 的更新完善了内容模式与布局名称、日程时间轴和重叠数量角标、分组设置与原位置返回，以及日程编辑的实时时间反馈。
 

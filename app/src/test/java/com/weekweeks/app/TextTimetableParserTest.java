@@ -180,7 +180,7 @@ public class TextTimetableParserTest {
     }
 
     @Test
-    public void rowApiReportsNullRowsAndRejectsVisualGrids() {
+    public void rowApiReportsNullRowsAndRejectsGridsWithoutWeekdayHeaders() {
         TextTimetableParser.Result result = TextTimetableParser.parseRows(java.util.Arrays.asList(
                 java.util.Arrays.asList("Math", "Mon", "1"), null,
                 java.util.Arrays.asList("English", "Tue", "2")), 10, 200);
@@ -188,7 +188,7 @@ public class TextTimetableParserTest {
         assertEquals(1, result.errors.size());
         assertTrue(result.errors.get(0).startsWith("第 2 行"));
         TextTimetableParser.Result grid = TextTimetableParser.parseRows(java.util.Arrays.asList(
-                java.util.Arrays.asList("节次", "周一", "周二"),
+                java.util.Arrays.asList("节次", "甲班", "乙班"),
                 java.util.Arrays.asList("1", "Math", "English")), 10, 200);
         assertTrue(grid.courses.isEmpty());
         assertEquals(2, grid.errors.size());

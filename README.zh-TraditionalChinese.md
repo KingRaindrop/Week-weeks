@@ -62,7 +62,9 @@
 
 ### 行程：給生活留一點位置
 
-- 新增一次性的個人安排，支援日期、開始／結束時間、地點和備註。
+- 個人日程可設為單次、每天、工作日（週一至週五）或每週指定星期，可選截止日期（含當天）。編輯時可選「僅本次」或「整個重複日程」。
+- 在課程詳情選擇編輯或長按課卡，可選擇單次調整日期、節次、教室或停課，也可編輯整門課程。提醒跟隨實際日期與地點。
+- 儲存課程或行程前會列出與另一類安排重疊的日期、時段和分鐘數，可捲動查看所有衝突，再返回修改或繼續儲存。
 - 日程模式的週視圖使用共用時間軸，卡片高度隨時長變化。短行程或未設結束時間的行程保留相當於 30 分鐘的最小顯示高度，不改變已儲存的時間。
 - 重疊行程在空間足夠時並排顯示；空間不足時以數量角標分組，點按即可從該組全部行程中選擇。超過 99 項時顯示 `99+`。
 - 每一天都有對應日期的新增按鈕；列表依時間順序顯示所選內容。
@@ -73,7 +75,7 @@
 
 - 透過系統檔案選擇器匯入文字型 **PDF、XLSX、CSV、TSV 或 TXT** 課表，不要求廣泛的儲存空間讀寫權限；也支援直接貼上文字。
 - 先預覽解析結果，逐項檢查課程，確認後再儲存。
-- 試算表與分隔文字採用**每列一門課**的格式，可使用 [XLSX 範本](<docs/templates/timetable-list-template.xlsx>) 或 [CSV 範本](<docs/templates/timetable-list-template.csv>)。
+- 試算表、分隔文字和貼上匯入皆支援每列一門課的清單（[XLSX 範本](<docs/templates/timetable-list-template.xlsx>)、[CSV 範本](<docs/templates/timetable-list-template.csv>)），也支援[橫排星期、縱排節次的週課表](<docs/IMPORT-PARSERS-20261119.md>)。XLSX 可在同一星期欄內垂直合併連續節次；複製或匯出成文字時，連堂節次請寫成 `1-2`。
 - 支援常見簡體、繁體、英文表頭及 `週一`／`Mon` 等星期寫法；詳細格式與限制見[匯入說明](<docs/IMPORT-PARSERS-20261114.md>)及[解析相容性補充](<docs/IMPORT-PARSERS-20261115.md>)。
 - 舊版 `.xls` 需先另存為 XLSX 或 CSV；不會自動辨識任意視覺格狀課表。PDF 解析對版面配置有要求，不支援掃描檔 OCR。
 
@@ -115,13 +117,15 @@
 
 正式應用程式套件名稱為 `com.weekweeks.app`。開發版與正式版均使用同一套最新介面，不再區分「原版／清新版」；內部 `pastel` 建置僅為相容性測試入口，不是另一個產品版本。不同套件名稱的資料不會自動移轉，更名前的舊應用程式也不會被自動解除安裝。
 
-目前原始碼版本為 **1.2.8**（`versionCode 11`）。
+目前原始碼版本為 **1.2.9**（`versionCode 12`）。
 
-下載：[Week weeks 1.2.8 APK](https://github.com/KingRaindrop/Week-weeks/releases/download/v1.2.8/week-weeks-1.2.8.apk) · [GitHub Release 頁面](https://github.com/KingRaindrop/Week-weeks/releases/tag/v1.2.8)。也可以依照下列方式自行建置。
+下載：[Week weeks 1.2.9 APK](https://github.com/KingRaindrop/Week-weeks/releases/download/v1.2.9/week-weeks-1.2.9.apk) · [GitHub Release 頁面](https://github.com/KingRaindrop/Week-weeks/releases/tag/v1.2.9)。也可以依照下列方式自行建置。
 
 官方 APK 不包含本機 OPPO Sans 字型檔；該字型無法使用時會採用系統字型。
 
 ## 本輪更新與驗證
+
+v1.2.9 新增單次調課與停課、重複行程，以及課程與行程衝突提示。XLSX、CSV、TSV、TXT 和貼上文字可直接辨識含星期表頭與節次欄的週課表；文字型 PDF 改善了繁體、全形數字和教室欄位相容性。Debug 與 Release 各通過 **416 項單元測試**，Release Lint 為 **0 錯誤、7 項既有警告**；MuMu 已驗證調課、重複行程、提醒復原與匯入預覽。
 
 2026 年 11 月 16 日的更新改善了行程時間軸、重疊項目選擇、分組設定、子設定返回位置及時間編輯回饋。Debug 與 Release 各通過 **368 項單元測試**；兩份 lint 報告均為 **0 錯誤、7 項既有警告**。隔離套件的介面裝置回歸通過 **993 項檢查**，模式切換、時間軸及提醒流程回歸也已通過。
 
